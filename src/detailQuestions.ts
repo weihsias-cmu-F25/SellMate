@@ -5,13 +5,26 @@ export interface DetailQuestion {
   text: string;
   hint?: string;
   placeholder: string;
+  inputType?: "choice" | "text" | "both";
   choices?: { label: string; value: string }[];
 }
 const choices = (...values: string[]) =>
   values.map((value) => ({ label: value, value }));
 
-/** Local demo question policy. Replace with your agent's structured next-question response. */
+function fieldFilled(item: Item, field: DetailField): boolean {
+  const value = item[field];
+  return typeof value === "string" ? Boolean(value.trim()) : Boolean(value);
+}
+
+/** Prefer the agent question plan (3–5 photo-aware prompts); else local demo policy. */
 export function nextDetailQuestion(item: Item): DetailQuestion | null {
+  if (item.questionPlan?.length) {
+    for (const question of item.questionPlan) {
+      if (!fieldFilled(item, question.field)) return question;
+    }
+    return null;
+  }
+
   if (!item.brand.trim())
     return {
       field: "brand",
@@ -136,6 +149,14 @@ export function answerDetail(
     !["Headphones", "Cameras", "Home & living", "Other"].includes(value)
   )
     patch.category = "Other";
+  if (question.field === "sellSpeed" && !choiceValue) {
+    const lower = value.toLowerCase();
+    patch.sellSpeed = /asap|quick|fast|3 day|soon/.test(lower)
+      ? "quick"
+      : /hurry|max|wait|highest/.test(lower)
+        ? "max"
+        : "normal";
+  }
   return revise(item, {
     ...patch,
     detailReplies: [

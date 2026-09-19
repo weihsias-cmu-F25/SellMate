@@ -1,25 +1,73 @@
 import {
   makeResearch,
   platformNames,
+  type DetailQuestionPlan,
   type Item,
   type Research,
   type Platform,
 } from "./model";
 
+export interface IdentifyResult {
+  brand: string;
+  model: string;
+  category: string;
+  name?: string;
+  confidence?: number;
+  notes?: string;
+  summary?: string;
+  knownFields?: string[];
+  uncertainFields?: string[];
+  prefill?: {
+    brand?: string;
+    model?: string;
+    category?: string;
+    condition?: string;
+    damage?: string;
+    accessories?: string;
+    dimensions?: string;
+  };
+  questionPlan?: DetailQuestionPlan[];
+  aiEnabled?: boolean;
+}
+
 /** Replace this adapter with your backend. No credentials belong in the browser. */
 export interface SellingService {
   identifySample(
     signal?: AbortSignal,
-  ): Promise<{ brand: string; model: string; category: string }>;
-  research(item: Item, signal?: AbortSignal): Promise<Research>;
+  ): Promise<IdentifyResult>;
+  identifyPhoto(
+    imageDataUrl: string,
+    signal?: AbortSignal,
+  ): Promise<IdentifyResult>;
+  research(item: Item, signal?: AbortSignal): Promise<
+    Research & {
+      reason?: string;
+      source?: "live" | "curated" | "ai_estimate" | "none";
+    }
+  >;
+  generateListingDraft(
+    item: Item,
+    signal?: AbortSignal,
+  ): Promise<{
+    title: string;
+    description: string;
+    byPlatform?: Partial<
+      Record<Platform, { title: string; description: string }>
+    >;
+  }>;
+  refreshQuestions(
+    item: Item,
+    signal?: AbortSignal,
+  ): Promise<DetailQuestionPlan[]>;
   publish(
     item: Item,
     platform: Platform,
     signal?: AbortSignal,
-  ): Promise<{ publishedAt: string }>;
+  ): Promise<{ publishedAt: string; url?: string }>;
   updatePrice(item: Item, price: number, signal?: AbortSignal): Promise<void>;
   closeListing(item: Item, signal?: AbortSignal): Promise<void>;
 }
+
 export function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted)
@@ -35,17 +83,155 @@ export function delay(ms: number, signal?: AbortSignal): Promise<void> {
     signal?.addEventListener("abort", abort, { once: true });
   });
 }
+
+async function api<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(
+      (data as { error?: string }).error || `Request failed (${res.status})`,
+    );
+  }
+  return data as T;
+}
+
+const headphonesPlan: DetailQuestionPlan[] = [
+  {
+    field: "purchased",
+    text: "About how long have you had them?",
+    placeholder: "e.g. Bought in 2024",
+    choices: [
+      { label: "Under a year", value: "Under a year" },
+      { label: "1–2 years", value: "1–2 years" },
+      { label: "Over 2 years", value: "Over 2 years" },
+      { label: "Not sure", value: "Not sure" },
+    ],
+  },
+  {
+    field: "condition",
+    text: "How’s the cosmetic condition?",
+    placeholder: "e.g. Small scratch on the ear cup…",
+    choices: [
+      { label: "Like new", value: "Excellent" },
+      { label: "Light wear", value: "Good" },
+      { label: "Visible wear", value: "Fair" },
+    ],
+  },
+  {
+    field: "functional",
+    text: "Do both sides, charging, and the controls work?",
+    placeholder: "Or tell me what you’ve noticed…",
+    choices: [
+      { label: "Yes, all working", value: "Yes" },
+      { label: "There’s an issue", value: "Not fully working" },
+      { label: "Not sure", value: "Not sure" },
+    ],
+  },
+  {
+    field: "accessories",
+    text: "Do you still have the case or cable?",
+    placeholder: "Or list what’s included…",
+    choices: [
+      { label: "Case + cable", value: "Case + cable" },
+      { label: "Case only", value: "Case only" },
+      { label: "Headphones only", value: "Headphones only" },
+      { label: "Not sure", value: "Not sure" },
+    ],
+  },
+  {
+    field: "sellSpeed",
+    text: "How quickly do you need to sell?",
+    placeholder: "Or describe your timeline…",
+    choices: [
+      { label: "ASAP (1–3 days)", value: "quick" },
+      { label: "About a week", value: "normal" },
+      { label: "Not in a hurry", value: "max" },
+    ],
+  },
+];
+
 export const sellingService: SellingService = {
   async identifySample(signal) {
-    await delay(1100, signal);
-    return { brand: "Sony", model: "WH-1000XM5", category: "Headphones" };
+    try {
+      // Prefer agent health; sample identity stays the headphones demo.
+      await fetch("/api/health", { signal });
+    } catch {
+      /* offline fallback below */
+    }
+    await delay(400, signal);
+    return {
+      brand: "Sony",
+      model: "WH-1000XM5",
+      category: "Headphones",
+      name: "Sony WH-1000XM5",
+      confidence: 1,
+      questionPlan: headphonesPlan,
+      aiEnabled: false,
+    };
   },
+
+  async identifyPhoto(imageDataUrl, signal) {
+    return api<IdentifyResult>("/api/identify", { imageDataUrl }, signal);
+  },
+
   async research(item, signal) {
-    await delay(1500, signal);
-    return makeResearch(item);
+    try {
+      return await api<
+        Research & {
+          reason?: string;
+          source?: "live" | "curated" | "ai_estimate" | "none";
+        }
+      >("/api/research", { item }, signal);
+    } catch {
+      await delay(800, signal);
+      return makeResearch(item);
+    }
   },
+
+  async generateListingDraft(item, signal) {
+    try {
+      const data = await api<{
+        draft: { title: string; description: string };
+        drafts?: Record<
+          string,
+          { title: string; description: string }
+        >;
+      }>("/api/listings", { item }, signal);
+      return {
+        title: data.draft.title,
+        description: data.draft.description,
+        byPlatform: data.drafts as
+          | Partial<Record<Platform, { title: string; description: string }>>
+          | undefined,
+      };
+    } catch {
+      await delay(300, signal);
+      return {
+        title: `${[item.brand, item.model].filter(Boolean).join(" ")} — ${item.condition || "Good"}`,
+        description: `${[item.brand, item.model].filter(Boolean).join(" ")} in ${(item.condition || "good").toLowerCase()} condition.`,
+      };
+    }
+  },
+
+  async refreshQuestions(item, signal) {
+    const data = await api<{ questionPlan: DetailQuestionPlan[] }>(
+      "/api/questions",
+      { item },
+      signal,
+    );
+    return data.questionPlan;
+  },
+
   async publish(item, platform, signal) {
-    await delay(platform === "offerup" ? 2200 : 1400, signal);
     if (
       import.meta.env.VITE_DEMO_FAIL_PUBLISH === "true" ||
       (import.meta.env.VITE_DEMO_FAIL_PLATFORMS || "")
@@ -64,15 +250,36 @@ export const sellingService: SellingService = {
       throw new Error(
         "Review your listing and choose a price before publishing.",
       );
-    return { publishedAt: new Date().toISOString() };
+    try {
+      return await api<{ publishedAt: string; url?: string }>(
+        "/api/publish",
+        { item, platform },
+        signal,
+      );
+    } catch (error) {
+      if (error instanceof Error && /could not be reached/i.test(error.message))
+        throw error;
+      await delay(platform === "offerup" ? 1200 : 700, signal);
+      return { publishedAt: new Date().toISOString() };
+    }
   },
+
   async updatePrice(_item, price, signal) {
     if (!Number.isFinite(price) || price < 1)
       throw new Error("Choose a valid price.");
-    await delay(900, signal);
+    try {
+      await api("/api/update-price", { price }, signal);
+    } catch {
+      await delay(500, signal);
+    }
   },
+
   async closeListing(_item, signal) {
-    await delay(1100, signal);
+    try {
+      await api("/api/close-listing", {}, signal);
+    } catch {
+      await delay(500, signal);
+    }
   },
 };
 

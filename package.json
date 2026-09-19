@@ -4,23 +4,34 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "concurrently -k -n api,web -c green,cyan \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:client": "vite --host 127.0.0.1",
+    "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "format": "prettier --write src README.md"
   },
   "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.1",
+    "express": "^5.2.1",
     "lucide-react": "^0.468.0",
+    "openai": "^7.20.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-router-dom": "^7.8.0"
+    "react-router-dom": "^7.8.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^10.0.5",
     "prettier": "^3.9.8",
+    "tsx": "^4.23.13",
     "typescript": "~5.9.2",
     "vite": "^7.1.0",
     "vitest": "^4.1.11"
