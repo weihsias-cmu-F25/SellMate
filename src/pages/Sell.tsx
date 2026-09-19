@@ -33,6 +33,7 @@ import {
 } from "../components";
 import {
   generateListings,
+  itemName,
   log,
   money,
   INTEGRATED_PLATFORMS,
@@ -96,15 +97,44 @@ function SellWorkspace({ id }: { id: string }) {
       setError("You can add up to 4 photos. Remove one before adding more.");
       return;
     }
-    void run("Preparing your photos…", async (signal) => {
+      void run("Identifying your item…", async (signal) => {
       const photos = await Promise.all(incoming.map(readPhoto));
       if (signal.aborted) return;
+      const shouldIdentify = item.photos.length === 0 && !item.brand.trim();
       updateItem(id, (i) => ({
         ...i,
         sample: false,
         photos: [...i.photos, ...photos],
         reviewed: false,
       }));
+      if (!shouldIdentify) return;
+      const identified = await sellingService.identifyPhoto(photos[0], signal);
+      if (signal.aborted) return;
+      const prefill = identified.prefill || {};
+      // Only lock in identity from vision; leave condition/details for the 3–5 questions.
+      updateItem(id, (i) =>
+        log(
+          {
+            ...i,
+            brand: prefill.brand || identified.brand,
+            model: prefill.model || identified.model,
+            category: prefill.category || identified.category,
+            questionPlan: identified.questionPlan,
+            identificationNotes:
+              identified.summary ||
+              identified.notes ||
+              (identified.confidence != null
+                ? `${Math.round(identified.confidence * 100)}% confidence`
+                : i.identificationNotes),
+            stage: Math.max(1, i.stage),
+            reviewed: false,
+          },
+          identified.aiEnabled
+            ? `Identified ${identified.name || identified.brand} with AI`
+            : `Identified ${identified.name || [identified.brand, identified.model].join(" ")}`,
+        ),
+      );
+      setStep(1);
     });
   };
   const useSample = () =>
@@ -114,7 +144,10 @@ function SellWorkspace({ id }: { id: string }) {
         log(
           {
             ...i,
-            ...result,
+            brand: result.brand,
+            model: result.model,
+            category: result.category,
+            questionPlan: result.questionPlan,
             photos: ["/headphones.svg"],
             sample: true,
             stage: Math.max(1, i.stage),
@@ -137,19 +170,32 @@ function SellWorkspace({ id }: { id: string }) {
             reviewed: false,
             stage: Math.max(2, i.stage),
           },
-          "Example price research prepared",
+          result.reason
+            ? `Price research ready · ${result.source || "estimate"}`
+            : "Price research prepared",
         ),
       );
       setStep(2);
     });
   const generate = () => {
-    updateItem(id, (i) =>
-      log(
-        { ...generateListings(i), stage: Math.max(3, i.stage) },
-        "Marketplace drafts generated",
-      ),
-    );
-    setStep(3);
+    void run("Writing marketplace drafts…", async (signal) => {
+      const draft = await sellingService.generateListingDraft(item, signal);
+      if (signal.aborted) return;
+      updateItem(id, (i) =>
+        log(
+          {
+            ...generateListings(i, {
+              title: draft.title,
+              description: draft.description,
+              byPlatform: draft.byPlatform,
+            }),
+            stage: Math.max(3, i.stage),
+          },
+          "Marketplace drafts generated",
+        ),
+      );
+      setStep(3);
+    });
   };
   const connectedPlatforms = INTEGRATED_PLATFORMS.filter(
     (p) => state.connections[p],
@@ -440,7 +486,7 @@ function SellWorkspace({ id }: { id: string }) {
                   <p>
                     {item.research ? (
                       <>
-                        Here’s an example comparison for your {item.model}.
+                        Here’s a price comparison for your {itemName(item)}.
                         Start at{" "}
                         <strong>{money(item.research.recommended)}</strong> for
                         a balanced asking price.
@@ -455,10 +501,22 @@ function SellWorkspace({ id }: { id: string }) {
                     <div className="research-status">
                       <span>
                         <CheckCircle2 size={15} />
-                        {item.research.comparables.length} example comparables
+                        {item.research.comparables.length} comparables
+                        {item.research.source === "live"
+                          ? " · live web listings"
+                          : item.research.source === "ai_estimate"
+                            ? " · AI market estimate"
+                            : item.research.source === "curated"
+                              ? " · matched comps"
+                              : ""}
                       </span>
-                      <span>USD · Demo research</span>
+                      <span>USD</span>
                     </div>
+                    {item.research.reason && (
+                      <p className="muted" style={{ marginTop: 8 }}>
+                        {item.research.reason}
+                      </p>
+                    )}
                     <div className="price-options">
                       {[
                         [
@@ -550,25 +608,39 @@ function SellWorkspace({ id }: { id: string }) {
                       {showComparables && (
                         <div className="comparables-content">
                           <p className="small-text muted">
-                            Illustrative results, not a live market search.
-                            Adjusted for your selected condition.
+                            {item.research.source === "live"
+                              ? "Live listings scraped from Craigslist and search results (OfferUp / eBay / Mercari / Marketplace) with links."
+                              : item.research.source === "ai_estimate"
+                                ? "AI market estimate for this brand/model (live scrape returned too few priced results)."
+                                : item.research.source === "curated"
+                                  ? "Matched comps from our local dataset for this product."
+                                  : "Limited matching comps were available."}
                           </p>
                           {item.research.comparables.map((c) => (
                             <div className="comparable" key={c.id}>
                               <div>
-                                <strong>{c.title}</strong>
+                                <strong>
+                                  {c.url ? (
+                                    <a
+                                      href={c.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {c.title}
+                                    </a>
+                                  ) : (
+                                    c.title
+                                  )}
+                                </strong>
                                 <span>
-                                  {c.platform} · {c.condition} ·{" "}
-                                  <span
-                                    className={
-                                      c.type === "Sold" ? "text-green" : ""
-                                    }
-                                  >
-                                    {c.type}
-                                  </span>
+                                  {c.platform} · {c.condition}
+                                  {c.source ? ` · ${c.source}` : ""}
+                                  {c.type ? ` · ${c.type}` : ""}
                                 </span>
                               </div>
-                              <strong>{money(c.price)}</strong>
+                              <strong>
+                                {c.price > 0 ? money(c.price) : "See listing"}
+                              </strong>
                             </div>
                           ))}
                           <p className="small-text muted">
@@ -576,8 +648,7 @@ function SellWorkspace({ id }: { id: string }) {
                             {new Date(
                               item.research.checkedAt,
                             ).toLocaleDateString()}
-                            . Real source links will appear when live search is
-                            connected.
+                            . Open a title to view the original listing.
                           </p>
                         </div>
                       )}
@@ -784,9 +855,9 @@ function SellWorkspace({ id }: { id: string }) {
                                 })
                               }
                             >
+                              <option>Local pickup</option>
                               <option>Buyer-paid shipping</option>
                               <option>Free shipping</option>
-                              <option>Local pickup</option>
                             </select>
                           </label>
                           <label>

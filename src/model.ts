@@ -39,6 +39,8 @@ export interface Comparable {
   type: "Sold" | "Asking";
   price: number;
   condition: string;
+  source?: "live" | "curated" | "ai_estimate";
+  url?: string;
 }
 export interface Research {
   fast: number;
@@ -46,6 +48,8 @@ export interface Research {
   max: number;
   checkedAt: string;
   comparables: Comparable[];
+  reason?: string;
+  source?: "live" | "curated" | "ai_estimate" | "none";
 }
 export interface Activity {
   id: string;
@@ -61,12 +65,22 @@ export const DETAIL_FIELDS = [
   "functional",
   "damage",
   "accessories",
+  "dimensions",
+  "sellSpeed",
 ] as const;
 export type DetailField = (typeof DETAIL_FIELDS)[number];
 export interface DetailReply {
   field: DetailField;
   question: string;
   answer: string;
+}
+export interface DetailQuestionPlan {
+  field: DetailField;
+  text: string;
+  hint?: string;
+  placeholder: string;
+  inputType?: "choice" | "text" | "both";
+  choices?: { label: string; value: string }[];
 }
 export interface Item {
   id: string;
@@ -80,6 +94,8 @@ export interface Item {
   damage: string;
   accessories: string;
   functional: string;
+  dimensions: string;
+  sellSpeed: string;
   price: number;
   stage: number;
   status: "draft" | "active" | "sold";
@@ -96,6 +112,9 @@ export interface Item {
   soldOn?: string;
   activity: Activity[];
   detailReplies?: DetailReply[];
+  /** Agent-built 3–5 question plan from photo identification. */
+  questionPlan?: DetailQuestionPlan[];
+  identificationNotes?: string;
   publishTargets?: Platform[];
 }
 export interface AppState {
@@ -110,8 +129,17 @@ export const money = (n: number) =>
     currency: "USD",
     maximumFractionDigits: n % 1 ? 2 : 0,
   }).format(n);
-export const itemName = (i: Item) =>
-  [i.brand, i.model].filter(Boolean).join(" ") || "Your next great sale";
+export const itemName = (i: Item) => {
+  const brand = i.brand.trim();
+  const model = i.model.trim();
+  if (!brand && !model) return "Your next great sale";
+  if (!brand) return model;
+  if (!model) return brand;
+  // Avoid "Bar Bar stool" when model already starts with brand.
+  if (model.toLowerCase().startsWith(brand.toLowerCase() + " ")) return model;
+  if (model.toLowerCase() === brand.toLowerCase()) return brand;
+  return `${brand} ${model}`;
+};
 export const ageInDays = (date?: string, now = Date.now()) =>
   date
     ? Math.max(0, Math.floor((now - new Date(date).getTime()) / 86400000))
@@ -147,10 +175,12 @@ export function blankItem(): Item {
     damage: "",
     accessories: "",
     functional: "",
+    dimensions: "",
+    sellSpeed: "",
     price: 0,
     stage: 0,
     status: "draft",
-    delivery: "Buyer-paid shipping",
+    delivery: "Local pickup",
     location: "",
     reviewed: false,
     createdAt: new Date().toISOString(),
@@ -174,6 +204,8 @@ export function revise(item: Item, patch: Partial<Item>): Item {
     "damage",
     "accessories",
     "functional",
+    "dimensions",
+    "sellSpeed",
   ];
   const changedFacts = facts.some(
     (k) => k in patch && patch[k as keyof Item] !== item[k as keyof Item],
@@ -197,8 +229,32 @@ export function revise(item: Item, patch: Partial<Item>): Item {
     ...(changedFacts || changedPrice ? { reviewed: false } : {}),
   };
 }
-export function generateListings(item: Item): Item {
-  const base = `${itemName(item)} in ${item.condition.toLowerCase()} condition. ${item.damage ? `Wear and damage: ${item.damage}. ` : ""}${item.purchased ? `Purchased ${item.purchased}. ` : "Purchase date unknown. "}${item.functional === "Yes" ? "Tested and working. " : `Functionality: ${item.functional.toLowerCase()}. `}${item.accessories ? `Included: ${item.accessories}.` : "No additional accessories specified."}`;
+export function generateListings(
+  item: Item,
+  draft?: {
+    title?: string;
+    description?: string;
+    byPlatform?: Partial<
+      Record<Platform, { title?: string; description?: string }>
+    >;
+  },
+): Item {
+  const fallbackTitle = `${itemName(item)} — ${item.condition || "Good"}`;
+  const fallbackBase =
+    draft?.description ||
+    `${itemName(item)} in ${(item.condition || "good").toLowerCase()} condition. ${item.dimensions ? `Dimensions: ${item.dimensions}. ` : ""}${item.damage ? `Wear and damage: ${item.damage}. ` : ""}${item.purchased ? `Purchased ${item.purchased}. ` : ""}${item.functional === "Yes" ? "Tested and working. " : item.functional ? `Functionality: ${item.functional.toLowerCase()}. ` : ""}${item.accessories ? `Included: ${item.accessories}.` : ""}`.trim();
+
+  const platformBlurb: Record<Platform, (base: string) => string> = {
+    ebay: (base) =>
+      `${base}\n\nShips or local pickup depending on buyer preference. Message with questions before buying.`,
+    offerup: (base) =>
+      `${base}\n\n${item.delivery === "Local pickup" || !item.delivery ? "Local pickup preferred." : item.delivery} Happy to answer questions.`,
+    facebook: (base) =>
+      `${base}\n\n${item.delivery === "Local pickup" || !item.delivery ? "Available for local pickup." : "Shipping available."} Message me if you’re interested!`,
+    mercari: (base) =>
+      `${base}\n\nPacked carefully for shipping. See photos for condition details.`,
+  };
+
   return {
     ...item,
     reviewed: false,
@@ -211,20 +267,21 @@ export function generateListings(item: Item): Item {
           current.status === "needs-removal"
         )
           return [p, current];
+        const platformDraft = draft?.byPlatform?.[p];
+        const title = (
+          platformDraft?.title ||
+          draft?.title ||
+          fallbackTitle
+        ).slice(0, p === "ebay" || p === "mercari" ? 80 : 120);
+        const description =
+          platformDraft?.description ||
+          platformBlurb[p](fallbackBase);
         return [
           p,
           {
             ...current,
-            title: `${itemName(item)} — ${item.condition}`.slice(
-              0,
-              p === "ebay" ? 80 : 120,
-            ),
-            description:
-              p === "facebook"
-                ? `${base}\n\n${item.delivery === "Local pickup" ? "Available for local pickup." : "Shipping available."} Message me if you’re interested!`
-                : p === "offerup"
-                  ? `${base}\n\nHappy to answer any questions.`
-                  : base,
+            title,
+            description,
             price: item.price,
           },
         ];
@@ -480,6 +537,16 @@ export function parseState(raw: string | null): AppState | null {
         "createdAt",
       ])
         if (typeof i[key] !== "string") return null;
+      // Upgrade older workspaces saved before agent fields existed.
+      if (typeof i.dimensions !== "string") i.dimensions = "";
+      if (typeof i.sellSpeed !== "string") i.sellSpeed = "";
+      if (i.questionPlan !== undefined && !Array.isArray(i.questionPlan))
+        return null;
+      if (
+        i.identificationNotes !== undefined &&
+        typeof i.identificationNotes !== "string"
+      )
+        return null;
       if (
         !Array.isArray(i.photos) ||
         !i.photos.every(validPhoto) ||
