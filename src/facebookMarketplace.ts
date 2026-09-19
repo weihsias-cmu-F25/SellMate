@@ -90,6 +90,36 @@ async function portablePhoto(
   };
 }
 
+/** Map SellMate condition values onto Facebook-friendly buckets. */
+export function facebookCondition(condition: string): string {
+  const value = condition
+    .trim()
+    .toLowerCase()
+    .replace(/[–—−]/g, "-")
+    .replace(/\s+/g, " ");
+  if (!value) return "Good";
+  if (/(^|\b)(new|brand new)(\b|$)/.test(value) && !/like new/.test(value))
+    return "New";
+  if (/excellent|like new|mint|as new|近全新/.test(value)) return "Excellent";
+  if (/fair|poor|visible wear|seller described|satisfactory|尚可/.test(value))
+    return "Fair";
+  if (/good|light wear|very good|良好/.test(value)) return "Good";
+  // Free-text / unknown → used-good so Marketplace can publish.
+  return "Good";
+}
+
+/** Map SellMate categories onto Facebook-friendly browse buckets. */
+export function facebookCategory(category: string): string {
+  const value = category.trim().toLowerCase();
+  if (!value) return "Other";
+  if (/headphone|earbud|headset|audio|speaker/.test(value)) return "Headphones";
+  if (/camera|photo|lens|fuji|canon|nikon/.test(value)) return "Cameras";
+  if (/home|living|furniture|desk|table|chair|sofa|lamp|ikea/.test(value))
+    return "Home & living";
+  if (/electronic|phone|laptop|computer/.test(value)) return "Headphones";
+  return "Other";
+}
+
 export async function openFacebookMarketplaceDraft(
   item: Item,
 ): Promise<string> {
@@ -101,6 +131,8 @@ export async function openFacebookMarketplaceDraft(
   )
     throw new Error("Add photos and generate the Facebook draft first.");
   if (item.price <= 0) throw new Error("Choose an asking price first.");
+  if (!item.condition.trim())
+    throw new Error("Choose an item condition before publishing to Facebook.");
 
   const requestId = crypto.randomUUID();
   const draft: FacebookDraft = {
@@ -109,9 +141,9 @@ export async function openFacebookMarketplaceDraft(
     title: listing.title,
     description: listing.description,
     price: item.price,
-    category: item.category,
-    condition: item.condition,
-    delivery: item.delivery,
+    category: facebookCategory(item.category),
+    condition: facebookCondition(item.condition),
+    delivery: item.delivery || "Local pickup",
     location: item.location,
     photos: await Promise.all(item.photos.map(portablePhoto)),
   };

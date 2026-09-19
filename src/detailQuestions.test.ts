@@ -40,14 +40,25 @@ describe("adaptive detail conversation", () => {
       })?.text,
     ).toContain("lens");
   });
-  it("preserves custom descriptions without pretending to infer their condition", () => {
+  it("keeps free-text wear notes and maps them to a publishable condition", () => {
     const item = { ...seedState().items[0], condition: "" };
     const question = nextDetailQuestion(item)!;
     const answered = answerDetail(item, question, "A scratch on the side");
     expect(answered.damage).toBe("A scratch on the side");
-    expect(answered.condition).toBe("Seller described");
+    expect(answered.condition).toBe("Good");
     expect(answered.detailReplies?.[0].answer).toBe("A scratch on the side");
     expect(answered.reviewed).toBe(false);
+  });
+  it("infers Fair from damage-heavy free-text condition answers", () => {
+    const item = { ...seedState().items[0], condition: "" };
+    const question = nextDetailQuestion(item)!;
+    const answered = answerDetail(
+      item,
+      question,
+      "Visible wear and some damage on the corner",
+    );
+    expect(answered.condition).toBe("Fair");
+    expect(answered.damage).toContain("Visible wear");
   });
   it("remembers answers and resumes after a reload, including uncertainty", () => {
     const state = seedState();

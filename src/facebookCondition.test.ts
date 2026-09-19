@@ -11,6 +11,11 @@ function options(condition: string): string[] {
     input: condition,
   });
 }
+function categories(category: string): string[] {
+  return runInNewContext(`${source}\ncategoryOptions(input)`, {
+    input: category,
+  });
+}
 describe("Facebook condition selection", () => {
   it("maps seller conditions without upgrading used items to new", () => {
     expect(options("Excellent")).toContain("Used - Like New");
@@ -18,7 +23,15 @@ describe("Facebook condition selection", () => {
     expect(options("used – good")).toContain("Used - Good");
     expect(options("Fair")).toContain("Used - Fair");
     expect(options("New")).toContain("New");
-    expect(options("Seller described")).toEqual([]);
+    expect(options("Seller described")).toContain("Used - Fair");
+    expect(options("Poor")).toContain("Used - Fair");
+    expect(options("")).toContain("Used - Good");
+  });
+  it("maps SellMate categories onto current Facebook labels", () => {
+    expect(categories("Headphones")[0]).toBe("Electronics");
+    expect(categories("Cameras")).toContain("Electronics");
+    expect(categories("Home & living")).toContain("Furniture");
+    expect(categories("Other")).toContain("Miscellaneous");
   });
   it.each([true, false])(
     "requires the condition control to reflect the selection (accepted: %s)",

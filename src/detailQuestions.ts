@@ -139,9 +139,16 @@ export function answerDetail(
   if (!text) return item;
   const value = choiceValue ?? text;
   const patch: Partial<Item> = { [question.field]: value };
-  // Keep custom descriptions verbatim; don't invent a condition classification.
+  // Prefer a concrete condition bucket so marketplace publish can map it.
   if (question.field === "condition" && !choiceValue) {
-    patch.condition = "Seller described";
+    const lower = text.toLowerCase();
+    patch.condition = /like new|excellent|mint|as new/.test(lower)
+      ? "Excellent"
+      : /fair|poor|heavy|visible wear|damage/.test(lower)
+        ? "Fair"
+        : /good|light wear|minor/.test(lower)
+          ? "Good"
+          : "Good";
     patch.damage = text;
   }
   if (

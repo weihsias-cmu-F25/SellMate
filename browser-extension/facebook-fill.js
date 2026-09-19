@@ -170,13 +170,16 @@ async function selectDropdown(
     const text = normalize(
       [
         current.getAttribute("aria-valuetext"),
+        current.getAttribute("aria-label"),
         current.textContent,
         controlText(current),
       ]
         .filter(Boolean)
         .join(" "),
     );
-    return wanted.some((alias) => ` ${text} `.includes(` ${alias} `));
+    return wanted.some(
+      (alias) => text.includes(alias) || ` ${text} `.includes(` ${alias} `),
+    );
   };
   if (verifySelection && selected()) return true;
   if (control instanceof HTMLSelectElement) {
@@ -203,7 +206,12 @@ async function selectDropdown(
       .find((candidate) => {
         const text = dropdownOptionText(candidate);
         return wanted.some(
-          (value) => text === value || text.startsWith(`${value} `),
+          (value) =>
+            text === value ||
+            text.startsWith(`${value} `) ||
+            (value.includes(" ") || value.includes("-") || value.length > 4
+              ? text.includes(value)
+              : false),
         );
       });
     if (option instanceof HTMLElement) {
@@ -222,40 +230,231 @@ async function selectDropdown(
   return false;
 }
 
+function categoryLevels(category) {
+  const value = normalize(category);
+  if (
+    value.includes("headphone") ||
+    value.includes("earbud") ||
+    value.includes("audio") ||
+    value.includes("speaker")
+  ) {
+    return [
+      [
+        "Electronics",
+        "Electronics & computers",
+        "Electronics and computers",
+        "電子產品",
+        "電子產品與電腦",
+      ],
+      ["Headphones", "Audio & headphones", "Audio", "Headsets", "耳機"],
+    ];
+  }
+  if (
+    value.includes("camera") ||
+    value.includes("photo") ||
+    value.includes("lens")
+  ) {
+    return [
+      [
+        "Electronics",
+        "Electronics & computers",
+        "Electronics and computers",
+        "電子產品",
+        "電子產品與電腦",
+      ],
+      [
+        "Cameras",
+        "Cameras & photo",
+        "Photo & video",
+        "Photography",
+        "相機",
+      ],
+    ];
+  }
+  if (
+    value.includes("electronic") ||
+    value.includes("phone") ||
+    value.includes("computer") ||
+    value.includes("laptop")
+  ) {
+    return [
+      [
+        "Electronics",
+        "Electronics & computers",
+        "Electronics and computers",
+        "電子產品",
+        "電子產品與電腦",
+      ],
+    ];
+  }
+  if (
+    value.includes("home") ||
+    value.includes("living") ||
+    value.includes("furniture") ||
+    value.includes("desk") ||
+    value.includes("table") ||
+    value.includes("chair") ||
+    value.includes("sofa")
+  ) {
+    return [
+      [
+        "Furniture",
+        "Household",
+        "Home Goods",
+        "Home & Garden",
+        "Home & Kitchen",
+        "Home",
+        "家居用品",
+        "居家與園藝",
+        "家具",
+      ],
+    ];
+  }
+  return [["Miscellaneous", "Other", "其他", "Misc"]];
+}
+
 function categoryOptions(category) {
-  if (category === "Headphones" || category === "Cameras")
-    return [
-      "Electronics & computers",
-      "Electronics and computers",
-      "Electronics",
-      "電子產品",
-      "電子產品與電腦",
-    ];
-  if (category === "Home & living")
-    return [
-      "Household",
-      "Furniture",
-      "Garden",
-      "Appliances",
-      "Home Goods",
-      "Home & Garden",
-      "家居用品",
-      "居家與園藝",
-    ];
-  return ["Miscellaneous", "Other", "其他"];
+  return categoryLevels(category).flat();
+}
+
+async function clickMatchingOption(optionAliases) {
+  const wanted = optionAliases.map(normalize);
+  const root = dropdownRoot();
+  const option = [
+    ...root.querySelectorAll(
+      '[role="option"], [role="menuitem"], [role="menuitemradio"], [role="radio"], [role="button"], [role="listitem"], li, span, div',
+    ),
+  ]
+    .filter(visible)
+    .find((candidate) => {
+      const text = dropdownOptionText(candidate);
+      if (!text || text.length > 80) return false;
+      return wanted.some(
+        (value) =>
+          text === value ||
+          text.startsWith(`${value} `) ||
+          (value.includes(" ") || value.includes("-") || value.length > 4
+            ? text.includes(value)
+            : false),
+      );
+    });
+  if (!(option instanceof HTMLElement)) return false;
+  option.click();
+  await sleep(350);
+  return true;
+}
+
+async function selectCategory(category) {
+  const levels = categoryLevels(category);
+  const primary = levels[0] || ["Miscellaneous", "Other", "其他"];
+
+  // Prefer the dedicated category control, then try search-assisted pick.
+  const control = await waitForControl(
+    'select, [role="combobox"], [role="button"], button, input',
+    ["category", "類別", "what are you selling", "商品類別"],
+    15000,
+  );
+  if (control instanceof HTMLElement) {
+    const already = normalize(
+      [
+        control.getAttribute("aria-valuetext"),
+        control.textContent,
+        control instanceof HTMLInputElement ? control.value : "",
+        controlText(control),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+    if (primary.some((alias) => already.includes(normalize(alias))))
+      return true;
+
+    control.click();
+    await sleep(450);
+
+    const root = dropdownRoot();
+    const search = [
+      ...root.querySelectorAll(
+        'input[type="text"], input[type="search"], input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"])',
+      ),
+    ].find(
+      (element) =>
+        element instanceof HTMLInputElement &&
+        visible(element) &&
+        !element.readOnly,
+    );
+    if (search instanceof HTMLInputElement) {
+      setNativeValue(search, primary[0]);
+      await sleep(500);
+    }
+
+    if (await clickMatchingOption(primary)) {
+      await sleep(400);
+      if (levels[1]?.length) {
+        // Subcategory is optional — do not fail the listing if it is absent.
+        await clickMatchingOption(levels[1]);
+        await sleep(300);
+      }
+      return true;
+    }
+  }
+
+  let selected =
+    (await selectDropdown(
+      ["category", "類別", "what are you selling", "商品類別"],
+      primary,
+      12000,
+      8000,
+      false,
+    )) ||
+    (await selectDropdown(
+      ["category", "類別", "what are you selling", "商品類別"],
+      categoryOptions(category),
+      8000,
+      8000,
+      false,
+    ));
+
+  if (!selected) {
+    selected = await selectDropdown(
+      ["category", "類別", "what are you selling", "商品類別"],
+      ["Miscellaneous", "Other", "其他", "Furniture", "Electronics"],
+      8000,
+      8000,
+      false,
+    );
+  }
+  return !!selected;
 }
 
 function conditionOptions(condition) {
   const value = normalize(condition).replace(/^used\s*-\s*/, "");
-  if (["excellent", "like new", "近全新"].includes(value))
+  if (
+    ["excellent", "like new", "近全新", "mint", "as new"].includes(value) ||
+    value.includes("like new")
+  )
     return ["Used - Like New", "Like New", "二手 - 近全新", "近全新"];
-  if (["good", "良好", "狀況良好"].includes(value))
+  if (
+    ["good", "良好", "狀況良好", "light wear", "very good"].includes(value) ||
+    value.includes("light wear")
+  )
     return ["Used - Good", "Good", "二手 - 良好", "狀況良好", "良好"];
-  if (["fair", "尚可"].includes(value))
+  if (
+    [
+      "fair",
+      "尚可",
+      "poor",
+      "visible wear",
+      "seller described",
+      "acceptable",
+    ].includes(value) ||
+    value.includes("seller described") ||
+    value.includes("visible wear")
+  )
     return ["Used - Fair", "Fair", "二手 - 尚可", "尚可"];
   if (["new", "brand new", "全新"].includes(value))
     return ["New", "Brand New", "全新"];
-  return [];
+  // Never return empty — Facebook requires a condition to publish.
+  return ["Used - Good", "Good", "二手 - 良好", "狀況良好", "良好"];
 }
 
 function deliveryOptions(delivery) {
@@ -406,12 +605,13 @@ async function run() {
         draft.location,
       ),
     ]);
-    const category = await selectDropdown(
-      ["category", "類別"],
-      categoryOptions(draft.category),
-    );
+    const category = await selectCategory(draft.category);
+    if (!category)
+      throw new Error(
+        "Facebook’s Category field could not be set. Open the Marketplace tab, choose a category manually, then try again from SellMate.",
+      );
     const conditionChoices = conditionOptions(draft.condition);
-    const condition =
+    let condition =
       conditionChoices.length > 0 &&
       (await selectDropdown(
         ["condition", "item condition", "商品狀況", "狀況"],
@@ -420,11 +620,20 @@ async function run() {
         7000,
         true,
       ));
+    // Facebook sometimes keeps the control label as "Condition" after a
+    // successful pick. Retry once without strict verification.
+    if (!condition && conditionChoices.length) {
+      condition = await selectDropdown(
+        ["condition", "item condition", "商品狀況", "狀況"],
+        conditionChoices,
+        8000,
+        7000,
+        false,
+      );
+    }
     if (!condition)
       throw new Error(
-        conditionChoices.length
-          ? "Facebook’s Condition field could not be confirmed. Select the matching condition in Facebook before continuing. Nothing was published."
-          : "Choose a specific item condition in SellMate before publishing to Facebook.",
+        "Facebook’s Condition field could not be set. Open the Marketplace tab, choose a condition manually, then try again from SellMate.",
       );
     const required = [...textResults.slice(0, 4), category, condition];
     console.info("[SellMate Facebook] Field results", {
