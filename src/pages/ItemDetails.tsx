@@ -52,7 +52,7 @@ function Details({ id }: { id: string }) {
   const [modal, setModal] = useState<"price" | "sold" | Platform | null>(null),
     [value, setValue] = useState(""),
     [url, setUrl] = useState(""),
-    [soldOn, setSoldOn] = useState("eBay");
+    [soldOn, setSoldOn] = useState("Vinted");
   const { busy, error, setError, run } = useTask();
   if (!item) return <NotFound />;
   const due = needsReview(item, state.reminderDays),

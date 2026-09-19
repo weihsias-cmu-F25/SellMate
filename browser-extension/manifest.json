@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "SellMate Marketplace Helper",
+  "version": "0.3.0",
+  "description": "Publishes reviewed SellMate drafts through signed-in Facebook Marketplace and Vinted sessions.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://www.facebook.com/*",
+    "https://*.vinted.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "js": ["sellmate-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/marketplace/create/*",
+        "https://www.facebook.com/marketplace/item/*"
+      ],
+      "js": ["facebook-fill.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://*.vinted.com/items/*"],
+      "js": ["vinted-fill.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

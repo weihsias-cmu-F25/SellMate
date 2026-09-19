@@ -37,8 +37,11 @@ import {
   log,
   money,
   INTEGRATED_PLATFORMS,
+  ASSISTED_PLATFORMS,
+  PUBLISH_PLATFORMS,
   platformNames,
   revise,
+  validateListingUrl,
   type Item,
   type Platform,
 } from "../model";
@@ -46,6 +49,14 @@ import { readPhoto, sellingService } from "../services";
 import { useStore, useTask } from "../store";
 
 import { DetailsChat } from "../DetailsChat";
+import {
+  openFacebookMarketplaceDraft,
+  subscribeToFacebookPublish,
+} from "../facebookMarketplace";
+import {
+  openVintedDraft,
+  subscribeToVintedPublish,
+} from "../vintedMarketplace";
 import { canPublish, publishBatch, selectedPlatforms } from "../publishing";
 
 const steps = ["Photo", "Details", "Price", "Review", "Publish"];
@@ -58,16 +69,125 @@ function SellWorkspace({ id }: { id: string }) {
     navigate = useNavigate();
   const item = state.items.find((i) => i.id === id);
   const [step, setStep] = useState(item?.stage || 0),
-    [previewPlatform, setPlatform] = useState<Platform>("ebay");
+    [previewPlatform, setPlatform] = useState<Platform>("vinted");
   const [showComparables, setShowComparables] = useState(false),
     [dragging, setDragging] = useState(false);
   const [publishingTargets, setPublishingTargets] = useState<Platform[]>([]);
   const uploadRef = useRef<HTMLInputElement>(null),
-    cameraRef = useRef<HTMLInputElement>(null);
+    cameraRef = useRef<HTMLInputElement>(null),
+    assistedStatusRef = useRef<Record<"vinted" | "facebook", string>>({
+      vinted: "",
+      facebook: "",
+    });
   const { busy, error, setError, run } = useTask();
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [step]);
+  useEffect(() => {
+    const handleStatus = (
+      platform: "vinted" | "facebook",
+      status: {
+        requestId: string;
+        itemId: string;
+        state: "opened" | "filled" | "submitting" | "live" | "error";
+        message?: string;
+        url?: string;
+      },
+    ) => {
+      if (status.itemId !== id) return;
+      const name = platformNames[platform];
+      console.info(`[SellMate ${name}] Publish status`, status);
+      const statusKey = `${status.requestId}:${status.state}:${status.url || ""}`;
+      if (assistedStatusRef.current[platform] === statusKey) return;
+      assistedStatusRef.current[platform] = statusKey;
+      if (status.state === "error") {
+        const message = status.message || `${name} could not fill this draft.`;
+        setError(message);
+        updateItem(id, (current) => ({
+          ...current,
+          listings: {
+            ...current.listings,
+            [platform]: {
+              ...current.listings[platform],
+              status: "error",
+              managed: false,
+              error: message,
+            },
+          },
+        }));
+        setPublishingTargets((current) =>
+          current.filter((target) => target !== platform),
+        );
+        return;
+      }
+      if (status.state === "filled") {
+        updateItem(id, (current) => ({
+          ...current,
+          listings: {
+            ...current.listings,
+            [platform]: {
+              ...current.listings[platform],
+              status: "awaiting",
+              managed: false,
+              error: undefined,
+            },
+          },
+        }));
+        notify(`${name} draft filled. The helper is preparing submission.`);
+        return;
+      }
+      if (status.state === "submitting") {
+        notify(`${name} is processing the listing.`);
+        return;
+      }
+      if (status.state === "live" && status.url) {
+        const url = validateListingUrl(status.url, platform);
+        if (!url) {
+          setError(`${name} returned an invalid listing URL.`);
+          return;
+        }
+        updateItem(id, (current) => {
+          if (
+            current.listings[platform].status === "live" &&
+            current.listings[platform].url === url
+          )
+            return current;
+          const publishedAt = new Date().toISOString();
+          return log(
+            {
+              ...current,
+              status: "active",
+              publishedAt: current.publishedAt || publishedAt,
+              listings: {
+                ...current.listings,
+                [platform]: {
+                  ...current.listings[platform],
+                  status: "live",
+                  managed: false,
+                  url,
+                  price: current.price,
+                  error: undefined,
+                  publishedAt,
+                },
+              },
+            },
+            `${name} listing confirmed`,
+          );
+        });
+        notify(`${name} listing confirmed and added to tracking.`);
+      }
+    };
+    const unsubscribeFacebook = subscribeToFacebookPublish((status) =>
+      handleStatus("facebook", status),
+    );
+    const unsubscribeVinted = subscribeToVintedPublish((status) =>
+      handleStatus("vinted", status),
+    );
+    return () => {
+      unsubscribeFacebook();
+      unsubscribeVinted();
+    };
+  }, [id, notify, setError, updateItem]);
   if (!item) return <NotFound />;
   if (item.status === "sold")
     return (
@@ -97,7 +217,7 @@ function SellWorkspace({ id }: { id: string }) {
       setError("You can add up to 4 photos. Remove one before adding more.");
       return;
     }
-      void run("Identifying your item…", async (signal) => {
+    void run("Identifying your item…", async (signal) => {
       const photos = await Promise.all(incoming.map(readPhoto));
       if (signal.aborted) return;
       const shouldIdentify = item.photos.length === 0 && !item.brand.trim();
@@ -197,21 +317,31 @@ function SellWorkspace({ id }: { id: string }) {
       setStep(3);
     });
   };
-  const connectedPlatforms = INTEGRATED_PLATFORMS.filter(
-    (p) => state.connections[p],
+  const connectedPlatforms = PUBLISH_PLATFORMS.filter(
+    (p) => ASSISTED_PLATFORMS.includes(p) || state.connections[p],
   );
   const targets = selectedPlatforms(item, state.connections).filter(
-    (p) => step !== 3 || state.connections[p],
+    (p) => step !== 3 || connectedPlatforms.includes(p),
   );
   const previewPlatforms = connectedPlatforms.filter((p) =>
     targets.includes(p),
   );
   const platform = previewPlatforms.includes(previewPlatform)
     ? previewPlatform
-    : (previewPlatforms[0] ?? "ebay");
+    : (previewPlatforms[0] ?? "vinted");
+  const managedTargets = targets.filter((p) =>
+    INTEGRATED_PLATFORMS.includes(p),
+  );
   const pendingTargets = targets.filter(
     (p) => item.listings[p].status !== "live",
   );
+  const pendingManagedTargets = managedTargets.filter(
+    (p) => item.listings[p].status !== "live",
+  );
+  const facebookPending =
+    targets.includes("facebook") && item.listings.facebook.status !== "live";
+  const vintedPending =
+    targets.includes("vinted") && item.listings.vinted.status !== "live";
   const liveTargets = targets.filter((p) => item.listings[p].status === "live");
   const failedTargets = targets.filter(
     (p) => item.listings[p].status === "error",
@@ -223,70 +353,186 @@ function SellWorkspace({ id }: { id: string }) {
     patch({ publishTargets: next, reviewed: false });
     if (selected) setPlatform(p);
   };
+  const startAssistedPublish = async (
+    assistedPlatform: "vinted" | "facebook",
+    openDraft: (draftItem: Item) => Promise<string>,
+    signal: AbortSignal,
+  ) => {
+    const name = platformNames[assistedPlatform];
+    try {
+      console.info(`[SellMate ${name}] Sending draft to browser helper`, {
+        itemId: item.id,
+      });
+      await openDraft(item);
+      if (signal.aborted) return { ok: false, error: "Publishing cancelled." };
+      updateItem(id, (current) =>
+        log(
+          {
+            ...current,
+            listings: {
+              ...current.listings,
+              [assistedPlatform]: {
+                ...current.listings[assistedPlatform],
+                status: "awaiting",
+                managed: false,
+                error: undefined,
+              },
+            },
+          },
+          `${name} submission sent to browser helper`,
+        ),
+      );
+      console.info(`[SellMate ${name}] Browser helper accepted the draft`);
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : `${name} publishing could not start.`;
+      console.error(`[SellMate ${name}] Could not start publishing`, error);
+      if (!signal.aborted)
+        updateItem(id, (current) => ({
+          ...current,
+          listings: {
+            ...current.listings,
+            [assistedPlatform]: {
+              ...current.listings[assistedPlatform],
+              status: "error",
+              managed: false,
+              error: message,
+            },
+          },
+        }));
+      return { ok: false, error: message };
+    } finally {
+      setPublishingTargets((current) =>
+        current.filter((target) => target !== assistedPlatform),
+      );
+    }
+  };
   const publish = () => {
-    if (!canPublish(item, targets, state.connections)) return;
+    if (!ready) return;
     setStep(4);
     updateItem(id, (i) => ({ ...i, stage: 4, publishTargets: targets }));
     void run("Publishing selected marketplaces…", async (signal) => {
       setPublishingTargets(pendingTargets);
       try {
-        const results = await publishBatch(
-          item,
-          targets,
-          state.connections,
-          sellingService,
-          (result) => {
-            const p = result.platform;
-            updateItem(id, (i) =>
-              result.ok
-                ? log(
-                    {
-                      ...i,
-                      status: "active",
-                      publishedAt: i.publishedAt || result.publishedAt,
-                      listings: {
-                        ...i.listings,
-                        [p]: {
-                          ...i.listings[p],
-                          status: "live",
-                          managed: true,
-                          price: i.price,
-                          error: undefined,
-                          publishedAt: result.publishedAt,
+        const managedPublishing = pendingManagedTargets.length
+          ? publishBatch(
+              item,
+              pendingManagedTargets,
+              state.connections,
+              sellingService,
+              (result) => {
+                const p = result.platform;
+                updateItem(id, (i) =>
+                  result.ok
+                    ? log(
+                        {
+                          ...i,
+                          status: "active",
+                          publishedAt: i.publishedAt || result.publishedAt,
+                          listings: {
+                            ...i.listings,
+                            [p]: {
+                              ...i.listings[p],
+                              status: "live",
+                              managed: true,
+                              price: i.price,
+                              error: undefined,
+                              publishedAt: result.publishedAt,
+                            },
+                          },
+                        },
+                        `Published to ${platformNames[p]} · demo`,
+                      )
+                    : {
+                        ...i,
+                        listings: {
+                          ...i.listings,
+                          [p]: {
+                            ...i.listings[p],
+                            status: "error",
+                            error: result.error,
+                          },
                         },
                       },
-                    },
-                    `Published to ${platformNames[p]} · demo`,
-                  )
-                : {
-                    ...i,
-                    listings: {
-                      ...i.listings,
-                      [p]: {
-                        ...i.listings[p],
-                        status: "error",
-                        error: result.error,
-                      },
-                    },
-                  },
-            );
-            setPublishingTargets((current) => current.filter((t) => t !== p));
-          },
-          signal,
-        );
+                );
+                setPublishingTargets((current) =>
+                  current.filter((t) => t !== p),
+                );
+              },
+              signal,
+            )
+          : Promise.resolve([]);
+        const facebookPublishing = facebookPending
+          ? startAssistedPublish(
+              "facebook",
+              openFacebookMarketplaceDraft,
+              signal,
+            )
+          : Promise.resolve({ ok: false, error: "" });
+        const vintedPublishing = vintedPending
+          ? startAssistedPublish("vinted", openVintedDraft, signal)
+          : Promise.resolve({ ok: false, error: "" });
+        const [results, facebookResult, vintedResult] = await Promise.all([
+          managedPublishing,
+          facebookPublishing,
+          vintedPublishing,
+        ]);
         const succeeded = results.filter((r) => r.ok).length;
-        notify(
-          succeeded === results.length
-            ? `Published to ${succeeded} marketplace${succeeded === 1 ? "" : "s"} in demo mode.`
-            : `${succeeded} published. Review the remaining marketplace errors below.`,
-        );
+        const assistedStarted = [
+          facebookResult.ok && "Facebook",
+          vintedResult.ok && "Vinted",
+        ].filter(Boolean);
+        const assistedErrors = [
+          facebookPending && !facebookResult.ok
+            ? `Facebook: ${facebookResult.error}`
+            : "",
+          vintedPending && !vintedResult.ok
+            ? `Vinted: ${vintedResult.error}`
+            : "",
+        ].filter(Boolean);
+        if (assistedErrors.length)
+          notify(
+            `${succeeded ? `${succeeded} demo marketplace published. ` : ""}${assistedErrors.join(" · ")}`,
+          );
+        else if (assistedStarted.length)
+          notify(
+            `${assistedStarted.join(" and ")} submission${assistedStarted.length === 1 ? "" : "s"} started${succeeded ? `; ${succeeded} demo marketplace published` : ""}.`,
+          );
+        else
+          notify(
+            results.length > 0 && succeeded === results.length
+              ? `Published to ${succeeded} marketplace${succeeded === 1 ? "" : "s"} in demo mode.`
+              : `${succeeded} published. Review the marketplace errors below.`,
+          );
       } finally {
         if (!signal.aborted) setPublishingTargets([]);
       }
     });
   };
   const currentListing = item.listings[platform];
-  const ready = canPublish(item, targets, state.connections);
+  const baseReady =
+    item.reviewed &&
+    item.photos.length > 0 &&
+    item.price > 0 &&
+    !!item.location.trim() &&
+    pendingTargets.length > 0;
+  const facebookReady =
+    !facebookPending ||
+    (!!item.listings.facebook.title.trim() &&
+      !!item.listings.facebook.description.trim() &&
+      item.listings.facebook.price === item.price);
+  const vintedReady =
+    !vintedPending ||
+    (!!item.listings.vinted.title.trim() &&
+      !!item.listings.vinted.description.trim() &&
+      item.listings.vinted.price === item.price);
+  const managedReady =
+    !pendingManagedTargets.length ||
+    canPublish(item, pendingManagedTargets, state.connections);
+  const ready = baseReady && facebookReady && vintedReady && managedReady;
   const detailReady =
     !!item.brand.trim() &&
     !!item.model.trim() &&
@@ -719,7 +965,9 @@ function SellWorkspace({ id }: { id: string }) {
                           <small>
                             {item.listings[p].status === "live"
                               ? "Already live · won’t repost"
-                              : "Connected · ready to publish"}
+                              : ASSISTED_PLATFORMS.includes(p)
+                                ? "Browser helper · automatic submission"
+                                : "Connected · ready to publish"}
                           </small>
                         </span>
                       </label>
@@ -788,11 +1036,11 @@ function SellWorkspace({ id }: { id: string }) {
                           Listing title
                           <span className="optional">
                             {currentListing.title.length}/
-                            {platform === "ebay" ? 80 : 120}
+                            {platform === "vinted" ? 100 : 120}
                           </span>
                           <input
                             required
-                            maxLength={platform === "ebay" ? 80 : 120}
+                            maxLength={platform === "vinted" ? 100 : 120}
                             value={currentListing.title}
                             readOnly={currentListing.status === "live"}
                             onChange={(e) =>
@@ -898,7 +1146,9 @@ function SellWorkspace({ id }: { id: string }) {
                           </span>
                         </label>
                         {footer(
-                          "All selected marketplaces publish together.",
+                          ASSISTED_PLATFORMS.includes(platform)
+                            ? `Publishing authorizes the browser helper to submit your ${platformNames[platform]} listing.`
+                            : "All selected marketplaces publish together.",
                           <Button type="submit" disabled={!ready}>
                             {pendingTargets.length
                               ? `Publish to ${pendingTargets.length} marketplace${pendingTargets.length === 1 ? "" : "s"}`
@@ -932,7 +1182,7 @@ function SellWorkspace({ id }: { id: string }) {
                   <p>
                     {busy
                       ? "Publishing each selected marketplace. You can follow the progress below."
-                      : `${liveTargets.length} of ${targets.length} selected marketplaces live in demo mode.`}
+                      : `${liveTargets.length} of ${targets.length} selected marketplaces confirmed live.`}
                   </p>
                 </div>
                 <div className="publish-platforms" aria-live="polite">
@@ -948,12 +1198,19 @@ function SellWorkspace({ id }: { id: string }) {
                             {sending
                               ? "Publishing your listing…"
                               : listing.status === "live"
-                                ? "Published successfully · demo"
+                                ? ASSISTED_PLATFORMS.includes(p)
+                                  ? "Published successfully · live URL confirmed"
+                                  : "Published successfully · demo"
                                 : listing.status === "error"
                                   ? listing.error
-                                  : !state.connections[p]
-                                    ? "Reconnect this marketplace to publish"
-                                    : "Ready to publish"}
+                                  : ASSISTED_PLATFORMS.includes(p) &&
+                                      listing.status === "awaiting"
+                                    ? "Browser helper is submitting the listing"
+                                    : ASSISTED_PLATFORMS.includes(p)
+                                      ? "Browser helper ready"
+                                      : !state.connections[p]
+                                        ? "Reconnect this marketplace to publish"
+                                        : "Ready to publish"}
                           </p>
                         </div>
                         {sending ? (
@@ -978,6 +1235,8 @@ function SellWorkspace({ id }: { id: string }) {
                               </>
                             ) : listing.status === "error" ? (
                               "Failed"
+                            ) : listing.status === "awaiting" ? (
+                              "Submitting"
                             ) : (
                               "Ready"
                             )}

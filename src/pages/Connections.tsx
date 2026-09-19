@@ -10,7 +10,12 @@ import {
 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { Badge, Button, Modal, PageHeading, PlatformLogo } from "../components";
-import { PLATFORMS, platformNames, INTEGRATED_PLATFORMS } from "../model";
+import {
+  ASSISTED_PLATFORMS,
+  PLATFORMS,
+  platformNames,
+  INTEGRATED_PLATFORMS,
+} from "../model";
 import { useStore } from "../store";
 
 export function Connections() {
@@ -65,7 +70,9 @@ export function Connections() {
                       ? state.connections[p]
                         ? "Demo account connected"
                         : "No demo account connected"
-                      : "Open marketplace, publish, and record the link"}
+                      : ASSISTED_PLATFORMS.includes(p)
+                        ? "Local browser helper publishes through your signed-in session"
+                        : "Open marketplace, publish, and record the link"}
                   </p>
                 </div>
                 {INTEGRATED_PLATFORMS.includes(p) ? (
@@ -98,7 +105,11 @@ export function Connections() {
                     )}
                   </Button>
                 ) : (
-                  <Badge tone="neutral">Manual handoff</Badge>
+                  <Badge tone="neutral">
+                    {ASSISTED_PLATFORMS.includes(p)
+                      ? "Browser helper"
+                      : "Manual handoff"}
+                  </Badge>
                 )}
               </div>
             ))}
@@ -148,8 +159,9 @@ export function Connections() {
             </div>
             <p>
               Photos and drafts are saved in this browser. Product recognition,
-              price comparisons, account connections, publishing, and connected
-              listing removal are simulated.
+              price comparisons, OfferUp publishing, account connections, and
+              connected listing removal are simulated. Facebook and Vinted can
+              use the optional local browser helper.
             </p>
             <div className="demo-setting-row">
               <div>
@@ -194,8 +206,8 @@ export function Connections() {
             <div className="connection-art-center">
               <Link2 size={27} />
             </div>
-            <span className="connection-art-node node-ebay">
-              <PlatformLogo platform="ebay" />
+            <span className="connection-art-node node-vinted">
+              <PlatformLogo platform="vinted" />
             </span>
             <span className="connection-art-node node-facebook">
               <PlatformLogo platform="facebook" />

@@ -74,20 +74,13 @@ export function PlatformLogo({ platform }: { platform: Platform }) {
       className={`platform-logo platform-${platform}`}
       aria-label={platformNames[platform]}
     >
-      {platform === "ebay" ? (
-        <span className="ebay-word">
-          <span>e</span>
-          <span>b</span>
-          <span>a</span>
-          <span>y</span>
-        </span>
-      ) : platform === "facebook" ? (
-        "f"
-      ) : platform === "offerup" ? (
-        "O"
-      ) : (
-        "m"
-      )}
+      {platform === "vinted"
+        ? "V"
+        : platform === "facebook"
+          ? "f"
+          : platform === "offerup"
+            ? "O"
+            : "m"}
     </span>
   );
 }

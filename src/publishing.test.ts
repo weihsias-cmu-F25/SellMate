@@ -17,7 +17,7 @@ function fixture() {
     status: "draft",
     listings: {
       ...state.items[0].listings,
-      ebay: { ...state.items[0].listings.ebay, status: "draft" },
+      vinted: { ...state.items[0].listings.vinted, status: "draft" },
       facebook: { ...state.items[0].listings.facebook, status: "draft" },
     },
   });
@@ -25,7 +25,7 @@ function fixture() {
   return { item, connections: state.connections };
 }
 describe("multi-marketplace publishing", () => {
-  it("publishes to both selected connections and reports each result", async () => {
+  it("publishes selected managed connections and reports each result", async () => {
     const { item, connections } = fixture();
     const publish = vi
       .fn()
@@ -33,43 +33,35 @@ describe("multi-marketplace publishing", () => {
     const report = vi.fn();
     const results = await publishBatch(
       item,
-      ["ebay", "offerup"],
+      ["offerup"],
       connections,
       { publish },
       report,
     );
-    expect(publish.mock.calls.map((call) => call[1])).toEqual([
-      "ebay",
-      "offerup",
-    ]);
+    expect(publish.mock.calls.map((call) => call[1])).toEqual(["offerup"]);
     expect(results.every((r) => r.ok)).toBe(true);
-    expect(report).toHaveBeenCalledTimes(2);
+    expect(report).toHaveBeenCalledTimes(1);
   });
-  it("preserves success when a destination fails and skips it on retry", async () => {
+  it("reports a managed failure and allows retry", async () => {
     const { item, connections } = fixture();
-    const publish = vi.fn(async (_item: Item, platform: Platform) => {
-      if (platform === "offerup") throw new Error("OfferUp unavailable");
-      return { publishedAt: "2026-09-19T00:00:00Z" };
-    });
+    const publish = vi
+      .fn<
+        (_item: Item, platform: Platform) => Promise<{ publishedAt: string }>
+      >()
+      .mockRejectedValueOnce(new Error("OfferUp unavailable"))
+      .mockResolvedValue({ publishedAt: "2026-09-19T00:00:00Z" });
     await publishBatch(
       item,
-      ["ebay", "offerup"],
+      ["offerup"],
       connections,
       { publish },
       (result) => {
         item.listings[result.platform].status = result.ok ? "live" : "error";
       },
     );
-    expect(item.listings.ebay.status).toBe("live");
     expect(item.listings.offerup.status).toBe("error");
     publish.mockClear();
-    await publishBatch(
-      item,
-      ["ebay", "offerup"],
-      connections,
-      { publish },
-      () => {},
-    );
+    await publishBatch(item, ["offerup"], connections, { publish }, () => {});
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish.mock.calls[0][1]).toBe("offerup");
   });
@@ -80,15 +72,15 @@ describe("multi-marketplace publishing", () => {
       canPublish(item, ["offerup"], { ...connections, offerup: false }),
     ).toBe(false);
     item.listings.offerup.description = "";
-    expect(canPublish(item, ["ebay", "offerup"], connections)).toBe(false);
-    expect(canPublish(item, ["ebay"], connections)).toBe(true);
+    expect(canPublish(item, ["offerup"], connections)).toBe(false);
+    expect(canPublish(item, ["vinted"], connections)).toBe(false);
   });
-  it("migrates legacy eBay settings without losing items", () => {
+  it("migrates legacy connection settings without losing items", () => {
     const state = seedState();
     const legacy = { ...state, connections: undefined, connected: false };
     const migrated = parseState(JSON.stringify(legacy))!;
     expect(migrated.connections).toEqual({
-      ebay: false,
+      vinted: false,
       offerup: true,
       facebook: false,
       mercari: false,

@@ -21,6 +21,7 @@ export interface ListingDraft {
 }
 
 export type PlatformDrafts = {
+  vinted: ListingDraft;
   ebay: ListingDraft;
   offerup: ListingDraft;
   facebook: ListingDraft;
@@ -53,6 +54,13 @@ function fallbackPlatformDrafts(item: ListingDraftInput): PlatformDrafts {
     : "Bay Area / South Bay.";
 
   return {
+    vinted: {
+      title: title.slice(0, 100),
+      description: [
+        facts,
+        "See photos for condition and included accessories.",
+      ].join("\n\n"),
+    },
     ebay: {
       title: title.slice(0, 80),
       description: [
@@ -109,12 +117,14 @@ export async function generatePlatformDrafts(
           content: `Write marketplace listing copy tailored to each platform.
 Return JSON:
 {
+  "vinted": { "title": string, "description": string },
   "ebay": { "title": string, "description": string },
   "offerup": { "title": string, "description": string },
   "facebook": { "title": string, "description": string },
   "mercari": { "title": string, "description": string }
 }
 Tone by platform:
+- vinted: concise, clear condition and included accessories, title under 100 chars
 - ebay: structured, includes shipping/returns friendly language, factual
 - offerup: casual, local meetup / pickup focused, short
 - facebook: friendly neighbor tone, invite messages, local pickup
@@ -131,6 +141,10 @@ No hype. Keep titles under 80 chars for ebay/mercari.`,
     const text = response.choices[0]?.message?.content?.trim() || "";
     const parsed = JSON.parse(text) as Partial<PlatformDrafts>;
     return {
+      vinted: {
+        title: (parsed.vinted?.title || fallback.vinted.title).slice(0, 100),
+        description: parsed.vinted?.description || fallback.vinted.description,
+      },
       ebay: {
         title: parsed.ebay?.title || fallback.ebay.title,
         description: parsed.ebay?.description || fallback.ebay.description,
