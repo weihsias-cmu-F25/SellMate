@@ -1,5 +1,13 @@
 export const PLATFORMS = ["ebay", "facebook", "offerup", "mercari"] as const;
 export type Platform = (typeof PLATFORMS)[number];
+export const INTEGRATED_PLATFORMS: Platform[] = ["ebay", "offerup"];
+export type Connections = Record<Platform, boolean>;
+export const defaultConnections = (): Connections => ({
+  ebay: true,
+  offerup: true,
+  facebook: false,
+  mercari: false,
+});
 export const platformNames: Record<Platform, string> = {
   ebay: "eBay",
   facebook: "Facebook Marketplace",
@@ -15,6 +23,7 @@ export const platformUrls: Record<Platform, string> = {
 export type ListingStatus =
   "draft" | "awaiting" | "live" | "ended" | "needs-removal" | "error";
 export interface Listing {
+  managed?: boolean;
   status: ListingStatus;
   title: string;
   description: string;
@@ -87,11 +96,12 @@ export interface Item {
   soldOn?: string;
   activity: Activity[];
   detailReplies?: DetailReply[];
+  publishTargets?: Platform[];
 }
 export interface AppState {
   version: 1;
   items: Item[];
-  connected: boolean;
+  connections: Connections;
   reminderDays: number;
 }
 export const money = (n: number) =>
@@ -222,25 +232,33 @@ export function generateListings(item: Item): Item {
     ) as Item["listings"],
   };
 }
+export function isManaged(item: Item, platform: Platform): boolean {
+  return (
+    item.listings[platform].managed ??
+    (platform === "ebay" && !item.listings[platform].url)
+  );
+}
 export function changePrice(item: Item, price: number): Item {
   const next = {
     ...item,
     price,
     lastReviewAt: new Date().toISOString(),
-    listings: {
-      ...item.listings,
-      ebay: {
-        ...item.listings.ebay,
-        price:
-          item.listings.ebay.status === "live"
-            ? price
-            : item.listings.ebay.price,
-      },
-    },
+    listings: Object.fromEntries(
+      PLATFORMS.map((p) => [
+        p,
+        {
+          ...item.listings[p],
+          price:
+            isManaged(item, p) && item.listings[p].status === "live"
+              ? price
+              : item.listings[p].price,
+        },
+      ]),
+    ) as Item["listings"],
   };
   return log(
     next,
-    `Asking price updated to ${money(price)}${item.listings.ebay.status === "live" ? " · eBay synced in demo" : ""}`,
+    `Asking price updated to ${money(price)} · connected listings synced in demo`,
   );
 }
 export function markSold(item: Item, salePrice: number, soldOn: string): Item {
@@ -250,7 +268,7 @@ export function markSold(item: Item, salePrice: number, soldOn: string): Item {
       {
         ...item.listings[p],
         status: ["live", "awaiting"].includes(item.listings[p].status)
-          ? p === "ebay" && item.listings[p].status === "live"
+          ? isManaged(item, p) && item.listings[p].status === "live"
             ? "ended"
             : "needs-removal"
           : item.listings[p].status,
@@ -402,7 +420,7 @@ export function seedState(): AppState {
   return {
     version: 1,
     items: [headphones, camera, lamp],
-    connected: true,
+    connections: defaultConnections(),
     reminderDays: 7,
   };
 }
@@ -416,11 +434,25 @@ export function parseState(raw: string | null): AppState | null {
   if (!raw) return null;
   try {
     const s: unknown = JSON.parse(raw);
+    // Upgrade existing browser workspaces without dropping their saved items.
+    if (
+      isObject(s) &&
+      s.version === 1 &&
+      s.connections === undefined &&
+      typeof s.connected === "boolean"
+    ) {
+      s.connections = { ...defaultConnections(), ebay: s.connected };
+      delete s.connected;
+    }
     if (
       !isObject(s) ||
       s.version !== 1 ||
       !Array.isArray(s.items) ||
-      typeof s.connected !== "boolean" ||
+      !isObject(s.connections) ||
+      !PLATFORMS.every(
+        (p) =>
+          typeof (s.connections as Record<string, unknown>)[p] === "boolean",
+      ) ||
       ![0, 7, 14].includes(s.reminderDays as number)
     )
       return null;
@@ -494,9 +526,24 @@ export function parseState(raw: string | null): AppState | null {
       )
         return null;
       if (i.soldOn !== undefined && typeof i.soldOn !== "string") return null;
+      if (
+        i.publishTargets !== undefined &&
+        (!Array.isArray(i.publishTargets) ||
+          !i.publishTargets.every((p) =>
+            INTEGRATED_PLATFORMS.includes(p as Platform),
+          ) ||
+          new Set(i.publishTargets).size !== i.publishTargets.length)
+      )
+        return null;
       if (!isObject(i.listings)) return null;
       for (const p of PLATFORMS) {
         const l = i.listings[p];
+        if (
+          isObject(l) &&
+          l.managed !== undefined &&
+          typeof l.managed !== "boolean"
+        )
+          return null;
         if (
           !isObject(l) ||
           ![

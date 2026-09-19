@@ -9,7 +9,7 @@
 1. **Overview `/`** — Primary “Sell an item” action, resumable drafts, active and sold items, and suggestions requiring a decision. Each item shows its photo, title, price, age, and marketplace statuses. Empty state: “Your next sale starts with a photo.”
 2. **Sell an item `/sell/:draftId`** — One guided workspace with five steps: Photo → Details → Price → Review → Publish. Persist the draft and allow returning to earlier steps.
 3. **Item details `/items/:id`** — The item’s price, age, live listing links, separate statuses per marketplace, activity, price suggestions, and “Mark as sold.” Enter this page from Overview or publishing success.
-4. **Connections `/settings/connections`** — Marketplace authorization status and reminder preferences. Connect eBay before the live demo. Treat other marketplace handoffs according to the integrations actually available.
+4. **Connections `/connections`** — Separate eBay and OfferUp demo connection controls and reminder preferences. Treat other marketplace handoffs according to the integrations actually available.
 
 ## Guided selling flow
 
@@ -38,18 +38,20 @@
 
 ### 4. Review
 
+- Select multiple connected destinations with checkbox cards, initially selecting connected eBay and OfferUp demo accounts. Keep destination selection separate from draft preview tabs.
 - Preview each platform’s generated title, description, photos, category, condition, and price.
 - Allow editing before publishing. Editing item facts or price should invalidate affected drafts and prompt regeneration or review.
 - Collect required delivery, location, shipping, return, and account policy details before the publish action becomes available.
 - Distinguish shared item facts from platform-specific text.
+- Use one primary action, “Publish to 2 marketplaces,” reflecting the number of pending destinations.
 
 ### 5. Publish
 
-- One row per platform with its own action and status.
-- eBay: Ready → Publishing → Live, or Failed with an actionable retry. Only show Live after external confirmation and a real listing URL/ID.
+- Publish selected destinations together, with one result row per platform and independent progress.
+- eBay and OfferUp demo adapters: Ready → Publishing → Live, or Failed with an actionable retry. The frontend labels these actions as simulated. In production, only show Live after external confirmation and a real listing URL/ID.
 - Assisted marketplaces: Open draft → Awaiting confirmation → Live after the seller records a live URL. Merely opening another website does not prove publication.
 - Preserve successful results when another platform fails. A retry must avoid creating duplicate listings.
-- Success emphasizes the product photo, “Your listing is live,” “View on eBay,” and “Track this item.”
+- Success emphasizes the product photo, “Your listings are live,” the result for each selected destination, and “Track this item.”
 
 ## Follow-up and sold workflow
 

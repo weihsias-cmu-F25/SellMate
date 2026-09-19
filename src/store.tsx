@@ -22,7 +22,7 @@ type Store = {
   updateItem: (id: string, change: (item: Item) => Item) => void;
   createItem: () => string;
   settings: (
-    patch: Partial<Pick<AppState, "connected" | "reminderDays">>,
+    patch: Partial<Pick<AppState, "connections" | "reminderDays">>,
   ) => void;
   notify: (message: string) => void;
   reset: (empty?: boolean) => void;
@@ -69,7 +69,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const reset = (empty = false) =>
     setState(
       empty
-        ? { version: 1, items: [], connected: false, reminderDays: 7 }
+        ? {
+            version: 1,
+            items: [],
+            connections: {
+              ebay: false,
+              offerup: false,
+              facebook: false,
+              mercari: false,
+            },
+            reminderDays: 7,
+          }
         : seedState(),
     );
   return (

@@ -36,6 +36,7 @@ import {
   log,
   money,
   PLATFORMS,
+  INTEGRATED_PLATFORMS,
   platformNames,
   platformUrls,
   revise,
@@ -46,6 +47,7 @@ import { readPhoto, sellingService } from "../services";
 import { useStore, useTask } from "../store";
 
 import { DetailsChat } from "../DetailsChat";
+import { canPublish, publishBatch, selectedPlatforms } from "../publishing";
 
 const steps = ["Photo", "Details", "Price", "Review", "Publish"];
 export function Sell() {
@@ -60,6 +62,7 @@ function SellWorkspace({ id }: { id: string }) {
     [platform, setPlatform] = useState<Platform>("ebay");
   const [showComparables, setShowComparables] = useState(false),
     [dragging, setDragging] = useState(false);
+  const [publishingTargets, setPublishingTargets] = useState<Platform[]>([]);
   const uploadRef = useRef<HTMLInputElement>(null),
     cameraRef = useRef<HTMLInputElement>(null);
   const { busy, error, setError, run } = useTask();
@@ -150,47 +153,83 @@ function SellWorkspace({ id }: { id: string }) {
     );
     setStep(3);
   };
-  const publish = () =>
-    void run("Publishing your demo listing…", async (signal) => {
+  const targets = selectedPlatforms(item, state.connections);
+  const pendingTargets = targets.filter(
+    (p) => item.listings[p].status !== "live",
+  );
+  const liveTargets = targets.filter((p) => item.listings[p].status === "live");
+  const failedTargets = targets.filter(
+    (p) => item.listings[p].status === "error",
+  );
+  const toggleTarget = (p: Platform, selected: boolean) => {
+    const next = selected
+      ? [...new Set([...targets, p])]
+      : targets.filter((t) => t !== p);
+    patch({ publishTargets: next, reviewed: false });
+    if (selected) setPlatform(p);
+  };
+  const publish = () => {
+    if (!canPublish(item, targets, state.connections)) return;
+    setStep(4);
+    updateItem(id, (i) => ({ ...i, stage: 4, publishTargets: targets }));
+    void run("Publishing selected marketplaces…", async (signal) => {
+      setPublishingTargets(pendingTargets);
       try {
-        const result = await sellingService.publish(item, signal);
-        updateItem(id, (i) =>
-          log(
-            {
-              ...i,
-              status: "active",
-              publishedAt: i.publishedAt || result.publishedAt,
-              listings: {
-                ...i.listings,
-                ebay: {
-                  ...i.listings.ebay,
-                  status: "live",
-                  price: i.price,
-                  error: undefined,
-                  publishedAt: result.publishedAt,
-                },
-              },
-            },
-            "Published to eBay · demo",
-          ),
+        const results = await publishBatch(
+          item,
+          targets,
+          state.connections,
+          sellingService,
+          (result) => {
+            const p = result.platform;
+            updateItem(id, (i) =>
+              result.ok
+                ? log(
+                    {
+                      ...i,
+                      status: "active",
+                      publishedAt: i.publishedAt || result.publishedAt,
+                      listings: {
+                        ...i.listings,
+                        [p]: {
+                          ...i.listings[p],
+                          status: "live",
+                          managed: true,
+                          price: i.price,
+                          error: undefined,
+                          publishedAt: result.publishedAt,
+                        },
+                      },
+                    },
+                    `Published to ${platformNames[p]} · demo`,
+                  )
+                : {
+                    ...i,
+                    listings: {
+                      ...i.listings,
+                      [p]: {
+                        ...i.listings[p],
+                        status: "error",
+                        error: result.error,
+                      },
+                    },
+                  },
+            );
+            setPublishingTargets((current) => current.filter((t) => t !== p));
+          },
+          signal,
         );
-        notify("Your eBay demo listing is live.");
-      } catch (e) {
-        if (!signal.aborted)
-          updateItem(id, (i) => ({
-            ...i,
-            listings: {
-              ...i.listings,
-              ebay: {
-                ...i.listings.ebay,
-                status: "error",
-                error: e instanceof Error ? e.message : "Publishing failed.",
-              },
-            },
-          }));
-        throw e;
+        const succeeded = results.filter((r) => r.ok).length;
+        notify(
+          succeeded === results.length
+            ? `Published to ${succeeded} marketplace${succeeded === 1 ? "" : "s"} in demo mode.`
+            : `${succeeded} published. Review the remaining marketplace errors below.`,
+        );
+      } finally {
+        if (!signal.aborted) setPublishingTargets([]);
       }
     });
+  };
   const openHandoff = (p: Platform) => {
     updateItem(id, (i) => ({
       ...i,
@@ -204,13 +243,7 @@ function SellWorkspace({ id }: { id: string }) {
     );
   };
   const currentListing = item.listings[platform];
-  const ready =
-    item.reviewed &&
-    item.price > 0 &&
-    item.photos.length > 0 &&
-    !!item.location.trim() &&
-    !!item.listings.ebay.title.trim() &&
-    item.listings.ebay.price === item.price;
+  const ready = canPublish(item, targets, state.connections);
   const detailReady =
     !!item.brand.trim() &&
     !!item.model.trim() &&
@@ -590,10 +623,55 @@ function SellWorkspace({ id }: { id: string }) {
                     its next owner.
                   </h2>
                   <p>
-                    A draft for each marketplace. Give everything a quick look.
+                    Choose all the marketplaces you want, review your drafts,
+                    and publish them together.
                   </p>
                 </div>
-                <div className="platform-tabs" aria-label="Listing platform">
+                <fieldset className="publish-selection">
+                  <legend>
+                    Where should I publish?{" "}
+                    <span>{targets.length} selected</span>
+                  </legend>
+                  <div className="publish-choice-grid">
+                    {INTEGRATED_PLATFORMS.map((p) => (
+                      <label
+                        key={p}
+                        className={`publish-choice ${targets.includes(p) ? "selected" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          aria-label={`Publish on ${platformNames[p]}`}
+                          checked={targets.includes(p)}
+                          disabled={
+                            item.listings[p].status === "live" ||
+                            (!state.connections[p] && !targets.includes(p))
+                          }
+                          onChange={(e) => toggleTarget(p, e.target.checked)}
+                        />
+                        <PlatformLogo platform={p} />
+                        <span>
+                          <strong>{platformNames[p]}</strong>
+                          <small>
+                            {item.listings[p].status === "live"
+                              ? "Already live · won’t repost"
+                              : state.connections[p]
+                                ? "Connected · ready to publish"
+                                : "Not connected"}
+                          </small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <Link to="/connections" className="text-button">
+                    Manage connections
+                    <Link2 size={14} />
+                  </Link>
+                </fieldset>
+                <p className="draft-preview-label">
+                  Preview & edit each draft{" "}
+                  <span>Switching previews doesn’t change your selection.</span>
+                </p>
+                <div className="platform-tabs" aria-label="Draft preview only">
                   {PLATFORMS.map((p) => (
                     <button
                       type="button"
@@ -608,8 +686,9 @@ function SellWorkspace({ id }: { id: string }) {
                     </button>
                   ))}
                 </div>
-                {!currentListing.title ||
-                currentListing.price !== item.price ? (
+                {(!currentListing.title ||
+                  currentListing.price !== item.price) &&
+                currentListing.status !== "live" ? (
                   <div className="inline-note">
                     <Sparkles size={18} />
                     <span>
@@ -622,7 +701,7 @@ function SellWorkspace({ id }: { id: string }) {
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
-                      if (ready) advance(4);
+                      if (ready) publish();
                     }}
                   >
                     <label>
@@ -730,9 +809,11 @@ function SellWorkspace({ id }: { id: string }) {
                       </span>
                     </label>
                     {footer(
-                      "Nothing is published until you say so.",
+                      "All selected marketplaces publish together.",
                       <Button type="submit" disabled={!ready}>
-                        Ready to sell
+                        {pendingTargets.length
+                          ? `Publish to ${pendingTargets.length} marketplace${pendingTargets.length === 1 ? "" : "s"}`
+                          : "Select a marketplace"}
                         <ArrowRight size={16} />
                       </Button>,
                     )}
@@ -741,130 +822,158 @@ function SellWorkspace({ id }: { id: string }) {
               </div>
             )}
             {step === 4 && (
-              <div className="step-content">
+              <div className="step-content batch-results">
                 <div className="step-intro">
-                  {item.listings.ebay.status === "live" && (
+                  {liveTargets.length > 0 && !busy && (
                     <span className="success-symbol">
                       <CheckCircle2 size={27} />
                     </span>
                   )}
                   <h2>
-                    {item.listings.ebay.status === "live"
-                      ? "Your listing is live."
-                      : "Ready to meet its next owner."}
+                    {busy
+                      ? "Finding more places to sell."
+                      : failedTargets.length
+                        ? "Some listings need another try."
+                        : liveTargets.length && !pendingTargets.length
+                          ? "Your listings are live."
+                          : "Ready to publish together."}
                   </h2>
                   <p>
-                    {item.listings.ebay.status === "live"
-                      ? "One less thing on your shelf. One step closer to sold."
-                      : "Choose your marketplaces. I’ve got your drafts ready."}
+                    {busy
+                      ? "Publishing each selected marketplace. You can follow the progress below."
+                      : `${liveTargets.length} of ${targets.length} selected marketplaces live in demo mode.`}
                   </p>
                 </div>
-                {!ready && item.listings.ebay.status !== "live" && (
-                  <div className="inline-note">
-                    <CircleHelp size={18} />
-                    <span>Finish reviewing the listing before publishing.</span>
-                    <Button variant="secondary" onClick={() => setStep(3)}>
-                      Review listing
-                    </Button>
-                  </div>
-                )}
-                <div className="publish-platforms">
-                  {PLATFORMS.map((p) => {
+                <div className="publish-platforms" aria-live="polite">
+                  {targets.map((p) => {
                     const listing = item.listings[p];
+                    const sending = publishingTargets.includes(p);
                     return (
                       <div className="publish-platform" key={p}>
                         <PlatformLogo platform={p} />
                         <div className="publish-platform-copy">
                           <h3>{platformNames[p]}</h3>
                           <p>
-                            {listing.status === "live"
-                              ? "Live · demo workspace"
-                              : listing.status === "awaiting"
-                                ? "Awaiting your live listing link"
+                            {sending
+                              ? "Publishing your listing…"
+                              : listing.status === "live"
+                                ? "Published successfully · demo"
                                 : listing.status === "error"
-                                  ? "Publish failed · your draft is safe"
-                                  : p === "ebay"
-                                    ? state.connected
-                                      ? "Connected · direct demo publishing"
-                                      : "Connect your demo account first"
-                                    : "Finish publishing on the marketplace"}
+                                  ? listing.error
+                                  : !state.connections[p]
+                                    ? "Reconnect this marketplace to publish"
+                                    : "Ready to publish"}
                           </p>
                         </div>
-                        {listing.status === "live" ? (
-                          <Badge>
-                            <Check size={13} />
-                            Live
+                        {sending ? (
+                          <Badge tone="neutral">
+                            <LoaderCircle className="spin" size={14} />
+                            Publishing
                           </Badge>
-                        ) : p === "ebay" ? (
-                          state.connected ? (
-                            <Button disabled={!ready} onClick={publish}>
-                              {listing.status === "error"
-                                ? "Retry publish"
-                                : "Publish to eBay"}
-                              <ArrowUpRightIcon size={15} />
-                            </Button>
-                          ) : (
-                            <Link
-                              className="button button-secondary"
-                              to="/connections"
-                            >
-                              Connect eBay
-                              <Link2 size={15} />
-                            </Link>
-                          )
                         ) : (
-                          <a
-                            className={`button button-secondary ${!ready ? "link-disabled" : ""}`}
-                            aria-disabled={!ready}
-                            href={ready ? platformUrls[p] : undefined}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            onClick={(e) => {
-                              if (!ready) {
-                                e.preventDefault();
-                                return;
-                              }
-                              openHandoff(p);
-                            }}
+                          <Badge
+                            tone={
+                              listing.status === "live"
+                                ? "green"
+                                : listing.status === "error"
+                                  ? "red"
+                                  : "neutral"
+                            }
                           >
-                            Open listing
-                            <ExternalLink size={14} />
-                          </a>
+                            {listing.status === "live" ? (
+                              <>
+                                <Check size={13} />
+                                Live
+                              </>
+                            ) : listing.status === "error" ? (
+                              "Failed"
+                            ) : (
+                              "Ready"
+                            )}
+                          </Badge>
                         )}
                       </div>
                     );
                   })}
                 </div>
-                {item.listings.ebay.status === "live" && (
+                {!busy && pendingTargets.length > 0 && (
+                  <div className="step-footer">
+                    <Button variant="secondary" onClick={() => setStep(3)}>
+                      Review selection
+                    </Button>
+                    <Button disabled={!ready} onClick={publish}>
+                      {failedTargets.length
+                        ? `Retry ${pendingTargets.length} remaining`
+                        : `Publish to ${pendingTargets.length} marketplaces`}
+                      <ArrowRight size={16} />
+                    </Button>
+                  </div>
+                )}
+                {!targets.length && (
+                  <Button onClick={() => setStep(3)}>
+                    Choose marketplaces
+                    <ArrowRight size={16} />
+                  </Button>
+                )}
+                {liveTargets.length > 0 && !busy && (
                   <div className="publish-success">
-                    <div>
-                      <CheckCircle2 size={19} />
-                      <span>eBay publishing completed in demo mode.</span>
-                    </div>
+                    <span>
+                      Successful listings stay live. Retrying only submits the
+                      remaining marketplaces.
+                    </span>
                     <Button onClick={() => navigate(`/items/${id}`)}>
                       Track this item
                       <ArrowRight size={17} />
                     </Button>
                   </div>
                 )}
-                <div className="inline-note subtle">
-                  <CircleHelp size={17} />
-                  <span>
-                    Opened a marketplace? Copy its draft from Review, finish
-                    posting there, then record the live link. Opening the
-                    website doesn’t publish your item.
-                  </span>
-                </div>
-                {item.listings.ebay.status !== "live" && (
-                  <Link className="text-button" to={`/items/${id}`}>
-                    Record a marketplace listing
-                    <ArrowRight size={15} />
-                  </Link>
+                {!busy && (
+                  <details className="manual-marketplaces">
+                    <summary>Post to other marketplaces manually</summary>
+                    <p className="small-text muted">
+                      Copy a draft from Review, finish posting on the
+                      marketplace, then record its live link.
+                    </p>
+                    {PLATFORMS.filter(
+                      (p) => !INTEGRATED_PLATFORMS.includes(p),
+                    ).map((p) => (
+                      <div className="publish-platform" key={p}>
+                        <PlatformLogo platform={p} />
+                        <div className="publish-platform-copy">
+                          <h3>{platformNames[p]}</h3>
+                          <p>
+                            {item.listings[p].status === "live"
+                              ? "Live link recorded"
+                              : item.listings[p].status === "awaiting"
+                                ? "Awaiting a live listing link"
+                                : "Manual publishing"}
+                          </p>
+                        </div>
+                        <a
+                          className="button button-secondary"
+                          href={platformUrls[p]}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          onClick={() => {
+                            if (item.listings[p].status !== "live")
+                              openHandoff(p);
+                          }}
+                        >
+                          Open marketplace
+                          <ExternalLink size={14} />
+                        </a>
+                      </div>
+                    ))}
+                    <Link className="text-button" to={`/items/${id}`}>
+                      Record a listing link
+                      <ArrowRight size={15} />
+                    </Link>
+                  </details>
                 )}
               </div>
             )}
           </fieldset>
-          {busy && (
+          {busy && step !== 4 && (
             <div className="working-overlay" role="status">
               <div className="working-orb">
                 <LoaderCircle size={29} className="spin" />

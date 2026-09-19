@@ -1,4 +1,10 @@
-import { makeResearch, type Item, type Research } from "./model";
+import {
+  makeResearch,
+  platformNames,
+  type Item,
+  type Research,
+  type Platform,
+} from "./model";
 
 /** Replace this adapter with your backend. No credentials belong in the browser. */
 export interface SellingService {
@@ -6,7 +12,11 @@ export interface SellingService {
     signal?: AbortSignal,
   ): Promise<{ brand: string; model: string; category: string }>;
   research(item: Item, signal?: AbortSignal): Promise<Research>;
-  publish(item: Item, signal?: AbortSignal): Promise<{ publishedAt: string }>;
+  publish(
+    item: Item,
+    platform: Platform,
+    signal?: AbortSignal,
+  ): Promise<{ publishedAt: string }>;
   updatePrice(item: Item, price: number, signal?: AbortSignal): Promise<void>;
   closeListing(item: Item, signal?: AbortSignal): Promise<void>;
 }
@@ -34,13 +44,23 @@ export const sellingService: SellingService = {
     await delay(1500, signal);
     return makeResearch(item);
   },
-  async publish(item, signal) {
-    await delay(1600, signal);
-    if (import.meta.env.VITE_DEMO_FAIL_PUBLISH === "true")
+  async publish(item, platform, signal) {
+    await delay(platform === "offerup" ? 2200 : 1400, signal);
+    if (
+      import.meta.env.VITE_DEMO_FAIL_PUBLISH === "true" ||
+      (import.meta.env.VITE_DEMO_FAIL_PLATFORMS || "")
+        .split(",")
+        .includes(platform)
+    )
       throw new Error(
-        "The demo marketplace could not be reached. Your draft is safe. Try again.",
+        `${platformNames[platform]} could not be reached in this demo. Your draft is safe. Try again.`,
       );
-    if (!item.reviewed || item.price <= 0)
+    if (
+      !item.reviewed ||
+      item.price <= 0 ||
+      !item.listings[platform].title.trim() ||
+      !item.listings[platform].description.trim()
+    )
       throw new Error(
         "Review your listing and choose a price before publishing.",
       );

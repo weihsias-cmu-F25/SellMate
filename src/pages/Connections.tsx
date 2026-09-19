@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { Badge, Button, Modal, PageHeading, PlatformLogo } from "../components";
-import { PLATFORMS, platformNames } from "../model";
+import { PLATFORMS, platformNames, INTEGRATED_PLATFORMS } from "../model";
 import { useStore } from "../store";
 
 export function Connections() {
@@ -61,26 +61,31 @@ export function Connections() {
                 <div>
                   <h3>{platformNames[p]}</h3>
                   <p>
-                    {p === "ebay"
-                      ? state.connected
+                    {INTEGRATED_PLATFORMS.includes(p)
+                      ? state.connections[p]
                         ? "Demo account connected"
                         : "No demo account connected"
                       : "Open marketplace, publish, and record the link"}
                   </p>
                 </div>
-                {p === "ebay" ? (
+                {INTEGRATED_PLATFORMS.includes(p) ? (
                   <Button
                     variant="secondary"
                     onClick={() => {
-                      settings({ connected: !state.connected });
+                      settings({
+                        connections: {
+                          ...state.connections,
+                          [p]: !state.connections[p],
+                        },
+                      });
                       notify(
-                        state.connected
+                        state.connections[p]
                           ? "Demo account disconnected."
                           : "Demo account connected. No real authorization was performed.",
                       );
                     }}
                   >
-                    {state.connected ? (
+                    {state.connections[p] ? (
                       <>
                         <Unplug size={14} />
                         Disconnect
@@ -143,8 +148,8 @@ export function Connections() {
             </div>
             <p>
               Photos and drafts are saved in this browser. Product recognition,
-              price comparisons, account connections, publishing, and eBay
-              removal are simulated.
+              price comparisons, account connections, publishing, and connected
+              listing removal are simulated.
             </p>
             <div className="demo-setting-row">
               <div>

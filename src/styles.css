@@ -3775,3 +3775,131 @@ label,
     display: none;
   }
 }
+
+/* Publication targets are independent of the draft-preview tabs. */
+.publish-selection {
+  border: 0;
+  padding: 0;
+  margin: 0 0 26px;
+  min-width: 0;
+}
+.publish-selection legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 500;
+  padding: 0;
+  margin-bottom: 13px;
+}
+.publish-selection legend span {
+  font-size: 12px;
+  color: #7b916b;
+  font-weight: 400;
+}
+.publish-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.publish-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #dfe6d7;
+  border-radius: 10px;
+  padding: 15px 12px;
+  margin: 0;
+  cursor: pointer;
+}
+.publish-choice.selected {
+  background: #eff5e7;
+  border-color: #8da679;
+  box-shadow: 0 0 0 1px #8da679;
+}
+.publish-choice > input {
+  width: 17px;
+  height: 17px;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+}
+.publish-choice > span:last-child {
+  min-width: 0;
+}
+.publish-choice strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 500;
+}
+.publish-choice small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: #7a8c6d;
+  margin-top: 4px;
+}
+.publish-choice .platform-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+.draft-preview-label {
+  font-size: 13px;
+  color: #5d754e;
+  margin-bottom: 10px;
+}
+.draft-preview-label > span {
+  display: block;
+  font-size: 11px;
+  color: #86967a;
+  margin-top: 4px;
+}
+.batch-results .publish-platform {
+  align-items: flex-start;
+}
+.batch-results .publish-platform p {
+  overflow-wrap: anywhere;
+}
+.batch-results .publish-platform .badge {
+  margin-top: 7px;
+}
+.batch-results .publish-success > span {
+  font-size: 13px;
+  color: #688355;
+}
+.manual-marketplaces {
+  border-top: 1px solid #e6ecde;
+  padding: 22px 0;
+  margin-top: 26px;
+}
+.manual-marketplaces summary {
+  color: #7b8f69;
+  font-size: 13px;
+  cursor: pointer;
+}
+.manual-marketplaces > p {
+  margin-top: 15px;
+}
+@media (max-width: 1250px) {
+  .publish-choice-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 520px) {
+  .publish-choice {
+    padding: 14px;
+  }
+  .publish-choice small {
+    font-size: 12px;
+  }
+  .publish-choice strong {
+    font-size: 16px;
+  }
+  .batch-results .publish-platform > .badge {
+    margin-left: 51px;
+  }
+}

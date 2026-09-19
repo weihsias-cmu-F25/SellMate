@@ -27,6 +27,7 @@ import {
   changePrice,
   hasCleanup,
   itemName,
+  isManaged,
   log,
   markSold,
   money,
@@ -56,7 +57,12 @@ function Details({ id }: { id: string }) {
   if (!item) return <NotFound />;
   const due = needsReview(item, state.reminderDays),
     cleanup = hasCleanup(item),
-    needsConnection = item.listings.ebay.status === "live" && !state.connected;
+    needsConnection = PLATFORMS.some(
+      (p) =>
+        isManaged(item, p) &&
+        item.listings[p].status === "live" &&
+        !state.connections[p],
+    );
   const dismiss = () => {
     setModal(null);
     setError("");
@@ -79,7 +85,7 @@ function Details({ id }: { id: string }) {
     void run("Updating price…", async (signal) => {
       if (needsConnection)
         throw new Error(
-          "Reconnect the eBay demo account before syncing its price.",
+          "Reconnect your disconnected marketplace accounts before syncing prices.",
         );
       await sellingService.updatePrice(item, Number(value), signal);
       updateItem(id, (i) => changePrice(i, Number(value)));
@@ -92,9 +98,13 @@ function Details({ id }: { id: string }) {
     void run("Closing listings…", async (signal) => {
       if (needsConnection)
         throw new Error(
-          "Reconnect the eBay demo account so we can close its listing.",
+          "Reconnect your disconnected marketplace accounts so we can close their listings.",
         );
-      if (item.listings.ebay.status === "live")
+      if (
+        PLATFORMS.some(
+          (p) => isManaged(item, p) && item.listings[p].status === "live",
+        )
+      )
         await sellingService.closeListing(item, signal);
       updateItem(id, (i) => markSold(i, Number(value), soldOn));
       setModal(null);
@@ -123,6 +133,7 @@ function Details({ id }: { id: string }) {
             [p]: {
               ...i.listings[p],
               status: "live",
+              managed: false,
               url: valid,
               price: Number(value),
               publishedAt:
@@ -367,7 +378,7 @@ function Details({ id }: { id: string }) {
                       </>
                     )}
                     {item.status !== "sold" &&
-                      (p !== "ebay" || l.status !== "live") && (
+                      (!isManaged(item, p) || l.status !== "live") && (
                         <Button
                           variant="ghost"
                           onClick={() => open(p, l.price || item.price)}
@@ -465,7 +476,7 @@ function Details({ id }: { id: string }) {
           {modal === "sold" ? (
             <form onSubmit={confirmSold}>
               <p className="muted">
-                Record the sale. I’ll close the demo eBay listing and help you
+                Record the sale. I’ll close connected demo listings and help you
                 finish the rest.
               </p>
               <label>
@@ -498,8 +509,11 @@ function Details({ id }: { id: string }) {
               <div className="inline-note">
                 <CheckCircle2 size={18} />
                 <span>
-                  {item.listings.ebay.status === "live"
-                    ? "eBay will be closed in this demo. "
+                  {PLATFORMS.some(
+                    (p) =>
+                      isManaged(item, p) && item.listings[p].status === "live",
+                  )
+                    ? "Connected listings will be closed in this demo. "
                     : ""}
                   Any other live or unconfirmed listings will stay on your
                   cleanup checklist until you confirm removal.
@@ -507,7 +521,7 @@ function Details({ id }: { id: string }) {
               </div>
               {needsConnection && (
                 <p className="error-message">
-                  Reconnect your demo eBay account in Connections first.
+                  Reconnect your marketplace accounts in Connections first.
                 </p>
               )}
               <div className="modal-actions">
@@ -544,8 +558,11 @@ function Details({ id }: { id: string }) {
               <div className="inline-note">
                 <Sparkles size={18} />
                 <span>
-                  {item.listings.ebay.status === "live"
-                    ? "The eBay price will update in this demo. "
+                  {PLATFORMS.some(
+                    (p) =>
+                      isManaged(item, p) && item.listings[p].status === "live",
+                  )
+                    ? "Connected listing prices will update in this demo. "
                     : ""}
                   Other live marketplaces will show a reminder to update their
                   prices manually.
@@ -553,7 +570,7 @@ function Details({ id }: { id: string }) {
               </div>
               {needsConnection && (
                 <p className="error-message">
-                  Reconnect your demo eBay account in Connections first.
+                  Reconnect your marketplace accounts in Connections first.
                 </p>
               )}
               <div className="modal-actions">
