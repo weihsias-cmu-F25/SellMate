@@ -1,21 +1,23 @@
-export const PLATFORMS = ["ebay", "facebook", "offerup", "mercari"] as const;
+export const PLATFORMS = ["vinted", "facebook", "offerup", "mercari"] as const;
 export type Platform = (typeof PLATFORMS)[number];
-export const INTEGRATED_PLATFORMS: Platform[] = ["ebay", "offerup"];
+export const INTEGRATED_PLATFORMS: Platform[] = ["offerup"];
+export const ASSISTED_PLATFORMS: Platform[] = ["vinted", "facebook"];
+export const PUBLISH_PLATFORMS: Platform[] = ["vinted", "facebook", "offerup"];
 export type Connections = Record<Platform, boolean>;
 export const defaultConnections = (): Connections => ({
-  ebay: true,
+  vinted: true,
   offerup: true,
   facebook: false,
   mercari: false,
 });
 export const platformNames: Record<Platform, string> = {
-  ebay: "eBay",
+  vinted: "Vinted",
   facebook: "Facebook Marketplace",
   offerup: "OfferUp",
   mercari: "Mercari",
 };
 export const platformUrls: Record<Platform, string> = {
-  ebay: "https://www.ebay.com/",
+  vinted: "https://www.vinted.com/",
   facebook: "https://www.facebook.com/marketplace/",
   offerup: "https://offerup.com/",
   mercari: "https://www.mercari.com/",
@@ -217,7 +219,7 @@ export function generateListings(item: Item): Item {
             ...current,
             title: `${itemName(item)} — ${item.condition}`.slice(
               0,
-              p === "ebay" ? 80 : 120,
+              p === "vinted" ? 100 : 120,
             ),
             description:
               p === "facebook"
@@ -233,10 +235,7 @@ export function generateListings(item: Item): Item {
   };
 }
 export function isManaged(item: Item, platform: Platform): boolean {
-  return (
-    item.listings[platform].managed ??
-    (platform === "ebay" && !item.listings[platform].url)
-  );
+  return item.listings[platform].managed ?? false;
 }
 export function changePrice(item: Item, price: number): Item {
   const next = {
@@ -294,7 +293,7 @@ export function validateListingUrl(
   try {
     const u = new URL(value);
     const domain = {
-      ebay: "ebay.com",
+      vinted: "vinted.com",
       facebook: "facebook.com",
       offerup: "offerup.com",
       mercari: "mercari.com",
@@ -332,7 +331,7 @@ export function makeResearch(item: Item): Research {
       {
         id: "c1",
         title: `${itemName(item)} · similar condition`,
-        platform: "eBay",
+        platform: "Vinted",
         type: "Sold",
         price: Math.round(recommended * 0.97),
         condition: item.condition,
@@ -340,7 +339,7 @@ export function makeResearch(item: Item): Research {
       {
         id: "c2",
         title: `${itemName(item)} · with accessories`,
-        platform: "eBay",
+        platform: "Vinted",
         type: "Sold",
         price: Math.round(recommended * 1.025),
         condition: item.condition,
@@ -378,8 +377,8 @@ export function seedState(): AppState {
   headphones.status = "active";
   headphones.publishedAt = date;
   headphones.reviewed = true;
-  headphones.listings.ebay = {
-    ...headphones.listings.ebay,
+  headphones.listings.vinted = {
+    ...headphones.listings.vinted,
     status: "live",
     publishedAt: date,
   };
@@ -391,7 +390,7 @@ export function seedState(): AppState {
   headphones.activity = [
     {
       id: "seed-publish",
-      text: "Example listings published on eBay and Facebook",
+      text: "Example listings published on Vinted and Facebook",
       at: date,
     },
   ];
@@ -441,8 +440,38 @@ export function parseState(raw: string | null): AppState | null {
       s.connections === undefined &&
       typeof s.connected === "boolean"
     ) {
-      s.connections = { ...defaultConnections(), ebay: s.connected };
+      s.connections = { ...defaultConnections(), vinted: s.connected };
       delete s.connected;
+    }
+    if (isObject(s) && isObject(s.connections) && "ebay" in s.connections) {
+      const connections = s.connections;
+      if (typeof connections.vinted !== "boolean")
+        connections.vinted = Boolean(connections.ebay);
+      delete connections.ebay;
+    }
+    if (isObject(s) && Array.isArray(s.items)) {
+      for (const item of s.items) {
+        if (!isObject(item)) continue;
+        if (isObject(item.listings) && "ebay" in item.listings) {
+          if (!("vinted" in item.listings)) {
+            const listing = item.listings.ebay;
+            if (
+              isObject(listing) &&
+              typeof listing.url === "string" &&
+              !validateListingUrl(listing.url, "vinted")
+            )
+              delete listing.url;
+            item.listings.vinted = listing;
+          }
+          delete item.listings.ebay;
+        }
+        if (Array.isArray(item.publishTargets))
+          item.publishTargets = [
+            ...new Set(
+              item.publishTargets.map((p) => (p === "ebay" ? "vinted" : p)),
+            ),
+          ];
+      }
     }
     if (
       !isObject(s) ||
@@ -530,7 +559,7 @@ export function parseState(raw: string | null): AppState | null {
         i.publishTargets !== undefined &&
         (!Array.isArray(i.publishTargets) ||
           !i.publishTargets.every((p) =>
-            INTEGRATED_PLATFORMS.includes(p as Platform),
+            PUBLISH_PLATFORMS.includes(p as Platform),
           ) ||
           new Set(i.publishTargets).size !== i.publishTargets.length)
       )

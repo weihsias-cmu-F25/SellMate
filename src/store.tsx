@@ -73,7 +73,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             version: 1,
             items: [],
             connections: {
-              ebay: false,
+              vinted: false,
               offerup: false,
               facebook: false,
               mercari: false,

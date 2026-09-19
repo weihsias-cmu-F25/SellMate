@@ -950,22 +950,10 @@ a {
   font-weight: 650;
   background: #fff;
 }
-.platform-ebay {
-  font-size: 15px;
-  letter-spacing: -1px;
-  font-weight: 500;
-}
-.ebay-word span:nth-child(1) {
-  color: #df5149;
-}
-.ebay-word span:nth-child(2) {
-  color: #5182be;
-}
-.ebay-word span:nth-child(3) {
-  color: #d6ac44;
-}
-.ebay-word span:nth-child(4) {
-  color: #79a552;
+.platform-vinted {
+  color: #09b1ba;
+  font-size: 22px;
+  font-weight: 700;
 }
 .platform-facebook {
   font-size: 26px;
@@ -987,8 +975,8 @@ a {
   border-radius: 6px;
   font-size: 17px;
 }
-.platform-stack .platform-ebay {
-  font-size: 12px;
+.platform-stack .platform-vinted {
+  font-size: 15px;
 }
 .price-review-label {
   display: flex;
@@ -1795,8 +1783,8 @@ input[type="radio"] {
   border-radius: 5px;
   font-size: 18px;
 }
-.platform-tabs .platform-ebay {
-  font-size: 12px;
+.platform-tabs .platform-vinted {
+  font-size: 14px;
 }
 .review-price {
   display: flex;
@@ -2275,7 +2263,7 @@ input[type="radio"] {
   position: absolute;
   z-index: 2;
 }
-.node-ebay {
+.node-vinted {
   top: 4px;
   left: 80px;
   transform: rotate(-10deg);
