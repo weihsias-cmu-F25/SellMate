@@ -1,14 +1,5 @@
 import { useEffect } from "react";
-import {
-  ArrowUpRight,
-  Bell,
-  Check,
-  CircleHelp,
-  FlaskConical,
-  LayoutGrid,
-  Link2,
-  Plus,
-} from "lucide-react";
+import { Check, LayoutGrid, Link2, Plus } from "lucide-react";
 import {
   BrowserRouter,
   Link,
@@ -19,7 +10,7 @@ import {
   useNavigate,
 } from "react-router-dom";
 import { Brand, NotFound } from "./components";
-import { needsReview } from "./model";
+import { Notifications } from "./Notifications";
 import { StoreProvider, useStore } from "./store";
 import { Overview } from "./pages/Overview";
 import { Sell } from "./pages/Sell";
@@ -30,9 +21,6 @@ function Shell() {
   const { state, createItem, storageError, notice } = useStore(),
     navigate = useNavigate(),
     location = useLocation();
-  const reviewCount = state.items.filter((i) =>
-    needsReview(i, state.reminderDays),
-  ).length;
   const title = location.pathname.startsWith("/sell")
     ? "Selling workspace"
     : location.pathname.startsWith("/items")
@@ -53,12 +41,6 @@ function Shell() {
         <Link to="/" className="brand-link" aria-label="SellMate overview">
           <Brand />
         </Link>
-        <div className="workspace-label">
-          <span className="workspace-avatar">S</span>
-          <div>
-            Personal workspace<span>Make room for what’s next</span>
-          </div>
-        </div>
         <div className="nav-caption">WORKSPACE</div>
         <nav aria-label="Main navigation">
           <NavLink to="/" end>
@@ -77,14 +59,14 @@ function Shell() {
             Connections
           </NavLink>
         </nav>
-        <div className="sidebar-bottom">
-          <Link to="/connections#demo" className="sidebar-help">
-            <CircleHelp size={17} />
-            About this demo
-          </Link>
-          <div className="sidebar-foot">
-            A little less clutter. A little more possibility.
-          </div>
+        <div className="sidebar-account">
+          <Notifications
+            items={state.items}
+            reminderDays={state.reminderDays}
+          />
+          <span className="profile-avatar" aria-label="Demo profile">
+            S
+          </span>
         </div>
       </aside>
       <div className="app-body">
@@ -94,34 +76,7 @@ function Shell() {
             <span>/</span>
             <strong>{title}</strong>
           </span>
-          <div className="topbar-actions">
-            <Link className="demo-indicator" to="/connections#demo">
-              <span />
-              Demo mode
-            </Link>
-            <Link
-              to="/?attention=1"
-              className="notification-button"
-              aria-label={`${reviewCount} price review suggestions`}
-            >
-              <Bell size={18} />
-              {reviewCount > 0 && <span className="notification-dot" />}
-            </Link>
-            <span className="profile-avatar" aria-label="Demo profile">
-              S
-            </span>
-          </div>
         </header>
-        <div className="demo-banner">
-          <FlaskConical size={14} />
-          <span>
-            A place to try things out. Example data, no real marketplace
-            actions.
-          </span>
-          <Link to="/connections#demo">
-            Demo settings <ArrowUpRight size={13} />
-          </Link>
-        </div>
         {storageError && (
           <div className="storage-warning" role="alert">
             Browser storage is full or unavailable. Your changes are available

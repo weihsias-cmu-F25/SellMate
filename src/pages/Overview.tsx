@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDownRight,
   ArrowRight,
@@ -8,16 +8,10 @@ import {
   Package,
   Plus,
   Search,
-  Sparkles,
+  X,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import {
-  Badge,
-  Button,
-  ItemPhoto,
-  PageHeading,
-  PlatformLogo,
-} from "../components";
+import { Badge, Button, ItemPhoto, PlatformLogo } from "../components";
 import {
   ageInDays,
   hasCleanup,
@@ -37,6 +31,14 @@ export function Overview() {
     [query, setQuery] = useState("");
   const attention = params.has("attention");
   const reviews = state.items.filter((i) => needsReview(i, state.reminderDays));
+  const reviewId = reviews[0]?.id;
+  const [showPriceAlert, setShowPriceAlert] = useState(true);
+  useEffect(() => {
+    setShowPriceAlert(true);
+    if (!reviewId) return;
+    const timer = window.setTimeout(() => setShowPriceAlert(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [reviewId, attention]);
   const cleanup = state.items.filter(hasCleanup);
   const visible = state.items.filter(
     (i) =>
@@ -47,17 +49,6 @@ export function Overview() {
   const start = () => navigate(`/sell/${createItem()}`);
   return (
     <>
-      <PageHeading
-        eyebrow="YOUR SELLING DESK"
-        title="A little less clutter."
-        description="Your items, their next owners, and everything in between."
-        action={
-          <Button onClick={start}>
-            <Plus size={17} />
-            Sell an item
-          </Button>
-        }
-      />
       <div className="overview-stats">
         <div className="overview-stat">
           <span className="stat-icon">
@@ -101,31 +92,37 @@ export function Overview() {
           </div>
         </div>
       </div>
-      {reviews[0] && (
-        <section className="recommendation">
-          <div className="recommendation-icon">
-            <Sparkles size={22} />
-          </div>
-          <div className="recommendation-copy">
-            <div className="eyebrow">A LITTLE NUDGE FROM SELLMATE</div>
-            <h2>Let’s get your {reviews[0].model || "item"} moving.</h2>
-            <p>
-              It’s been {ageInDays(reviews[0].publishedAt)} days. A small
-              adjustment from {money(reviews[0].price)} to{" "}
-              <strong>{money(suggestedPrice(reviews[0].price))}</strong> could
-              bring a little more interest.
-            </p>
-            <span className="small-text muted">
-              Example suggestion · You decide when the price changes
-            </span>
-          </div>
-          <Link
-            className="button button-secondary"
-            to={`/items/${reviews[0].id}`}
+      {reviews[0] && showPriceAlert && (
+        <section
+          key={`${reviewId}-${attention}`}
+          className="price-alert"
+          role="status"
+          aria-label="Price review reminder"
+        >
+          <button
+            className="price-alert-close"
+            aria-label="Dismiss price reminder"
+            onClick={() => setShowPriceAlert(false)}
           >
-            Review suggestion
+            <X size={18} />
+          </button>
+          <div className="price-alert-copy">
+            <h2>
+              {reviews[0].model || "Your item"} hasn’t sold in{" "}
+              {ageInDays(reviews[0].publishedAt)} days
+            </h2>
+            <p>
+              Suggested price: {money(reviews[0].price)} →{" "}
+              <strong>{money(suggestedPrice(reviews[0].price))}</strong>
+            </p>
+          </div>
+          <Link className="price-alert-action" to={`/items/${reviews[0].id}`}>
+            Review price
             <ArrowRight size={16} />
           </Link>
+          <div className="price-alert-countdown" aria-hidden="true">
+            <span />
+          </div>
         </section>
       )}
       {cleanup.length > 0 && (
@@ -151,6 +148,10 @@ export function Overview() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
+          <Button onClick={start}>
+            <Plus size={17} />
+            Sell an item
+          </Button>
         </div>
         <div className="inventory-toolbar">
           <div className="filter-tabs" aria-label="Filter items">
