@@ -5,6 +5,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const normalize = (value) =>
   String(value || "")
     .toLowerCase()
+    .replace(/[–—−]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 const visible = (element) =>
@@ -151,16 +152,45 @@ async function selectDropdown(
   optionAliases,
   controlTimeout = 7000,
   optionTimeout = 7000,
+  verifySelection = false,
 ) {
-  const control = await waitForControl(
-    '[role="combobox"], [role="button"], button',
-    fieldAliases,
-    controlTimeout,
-  );
+  const selector = 'select, [role="combobox"], [role="button"], button';
+  const control = await waitForControl(selector, fieldAliases, controlTimeout);
   if (!(control instanceof HTMLElement)) return false;
-  control.click();
-
   const wanted = optionAliases.map(normalize);
+  const matches = (value) =>
+    wanted.some((alias) => {
+      const text = normalize(value);
+      return text === alias || text.startsWith(`${alias} `);
+    });
+  const selected = () => {
+    const current = findControl(selector, fieldAliases) || control;
+    if (current instanceof HTMLSelectElement)
+      return matches(current.selectedOptions[0]?.textContent);
+    const text = normalize(
+      [
+        current.getAttribute("aria-valuetext"),
+        current.textContent,
+        controlText(current),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+    return wanted.some((alias) => ` ${text} `.includes(` ${alias} `));
+  };
+  if (verifySelection && selected()) return true;
+  if (control instanceof HTMLSelectElement) {
+    const option = [...control.options].find((option) =>
+      matches(option.textContent),
+    );
+    if (!option) return false;
+    control.value = option.value;
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+    await sleep(350);
+    return selected();
+  }
+  control.click();
   const started = Date.now();
   while (Date.now() - started < optionTimeout) {
     const root = dropdownRoot();
@@ -179,7 +209,13 @@ async function selectDropdown(
     if (option instanceof HTMLElement) {
       option.click();
       await sleep(350);
-      return true;
+      if (!verifySelection) return true;
+      const confirmationStarted = Date.now();
+      while (Date.now() - confirmationStarted < 3000) {
+        if (selected()) return true;
+        await sleep(200);
+      }
+      return false;
     }
     await sleep(250);
   }
@@ -210,11 +246,15 @@ function categoryOptions(category) {
 }
 
 function conditionOptions(condition) {
-  if (condition === "Excellent")
-    return ["Used - Like New", "Like New", "New", "近全新", "全新"];
-  if (condition === "Good") return ["Used - Good", "Good", "狀況良好", "良好"];
-  if (condition === "Fair" || condition === "Seller described")
-    return ["Used - Fair", "Fair", "尚可"];
+  const value = normalize(condition).replace(/^used\s*-\s*/, "");
+  if (["excellent", "like new", "近全新"].includes(value))
+    return ["Used - Like New", "Like New", "二手 - 近全新", "近全新"];
+  if (["good", "良好", "狀況良好"].includes(value))
+    return ["Used - Good", "Good", "二手 - 良好", "狀況良好", "良好"];
+  if (["fair", "尚可"].includes(value))
+    return ["Used - Fair", "Fair", "二手 - 尚可", "尚可"];
+  if (["new", "brand new", "全新"].includes(value))
+    return ["New", "Brand New", "全新"];
   return [];
 }
 
@@ -376,7 +416,16 @@ async function run() {
       (await selectDropdown(
         ["condition", "item condition", "商品狀況", "狀況"],
         conditionChoices,
+        15000,
+        7000,
+        true,
       ));
+    if (!condition)
+      throw new Error(
+        conditionChoices.length
+          ? "Facebook’s Condition field could not be confirmed. Select the matching condition in Facebook before continuing. Nothing was published."
+          : "Choose a specific item condition in SellMate before publishing to Facebook.",
+      );
     const required = [...textResults.slice(0, 4), category, condition];
     console.info("[SellMate Facebook] Field results", {
       photos: textResults[0],
