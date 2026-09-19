@@ -8,7 +8,6 @@ import {
   LayoutGrid,
   Link2,
   Plus,
-  Sparkles,
 } from "lucide-react";
 import {
   BrowserRouter,
@@ -79,27 +78,6 @@ function Shell() {
           </NavLink>
         </nav>
         <div className="sidebar-bottom">
-          <div className="side-note">
-            <span className="side-note-icon">
-              <Sparkles size={19} />
-            </span>
-            <p>
-              Less listing.
-              <br />
-              More living.
-            </p>
-            <span>
-              Your next sale starts
-              <br />
-              with a single photo.
-            </span>
-            <button
-              onClick={() => navigate(`/sell/${createItem()}`)}
-              aria-label="Start selling an item"
-            >
-              <ArrowUpRight size={18} />
-            </button>
-          </div>
           <Link to="/connections#demo" className="sidebar-help">
             <CircleHelp size={17} />
             About this demo

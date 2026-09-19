@@ -194,6 +194,13 @@ function Details({ id }: { id: string }) {
       item.listings[p].status !== "draft" &&
       item.listings[p].status !== "error",
   );
+  const visiblePlatforms = PLATFORMS.filter((p) =>
+    item.status === "sold"
+      ? tracked.includes(p)
+      : item.status === "active"
+        ? item.listings[p].status === "live"
+        : true,
+  );
   return (
     <>
       <Link to="/" className="back-link">
@@ -297,11 +304,9 @@ function Details({ id }: { id: string }) {
                     : "One item. Every marketplace, kept in view."}
                 </p>
               </div>
-              <span className="count-label">{tracked.length}</span>
+              <span className="count-label">{visiblePlatforms.length}</span>
             </div>
-            {PLATFORMS.filter(
-              (p) => item.status !== "sold" || tracked.includes(p),
-            ).map((p) => {
+            {visiblePlatforms.map((p) => {
               const l = item.listings[p],
                 pendingPrice = l.status === "live" && l.price !== item.price;
               return (
@@ -418,7 +423,7 @@ function Details({ id }: { id: string }) {
                 </div>
               );
             })}
-            {item.status !== "sold" && (
+            {item.status === "draft" && (
               <Link className="text-button add-marketplace" to={`/sell/${id}`}>
                 Continue selling setup
                 <ArrowRight size={15} />

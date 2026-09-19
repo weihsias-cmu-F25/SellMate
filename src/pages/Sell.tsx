@@ -35,10 +35,8 @@ import {
   generateListings,
   log,
   money,
-  PLATFORMS,
   INTEGRATED_PLATFORMS,
   platformNames,
-  platformUrls,
   revise,
   type Item,
   type Platform,
@@ -59,7 +57,7 @@ function SellWorkspace({ id }: { id: string }) {
     navigate = useNavigate();
   const item = state.items.find((i) => i.id === id);
   const [step, setStep] = useState(item?.stage || 0),
-    [platform, setPlatform] = useState<Platform>("ebay");
+    [previewPlatform, setPlatform] = useState<Platform>("ebay");
   const [showComparables, setShowComparables] = useState(false),
     [dragging, setDragging] = useState(false);
   const [publishingTargets, setPublishingTargets] = useState<Platform[]>([]);
@@ -153,7 +151,18 @@ function SellWorkspace({ id }: { id: string }) {
     );
     setStep(3);
   };
-  const targets = selectedPlatforms(item, state.connections);
+  const connectedPlatforms = INTEGRATED_PLATFORMS.filter(
+    (p) => state.connections[p],
+  );
+  const targets = selectedPlatforms(item, state.connections).filter(
+    (p) => step !== 3 || state.connections[p],
+  );
+  const previewPlatforms = connectedPlatforms.filter((p) =>
+    targets.includes(p),
+  );
+  const platform = previewPlatforms.includes(previewPlatform)
+    ? previewPlatform
+    : (previewPlatforms[0] ?? "ebay");
   const pendingTargets = targets.filter(
     (p) => item.listings[p].status !== "live",
   );
@@ -229,18 +238,6 @@ function SellWorkspace({ id }: { id: string }) {
         if (!signal.aborted) setPublishingTargets([]);
       }
     });
-  };
-  const openHandoff = (p: Platform) => {
-    updateItem(id, (i) => ({
-      ...i,
-      listings: {
-        ...i.listings,
-        [p]: { ...i.listings[p], status: "awaiting" },
-      },
-    }));
-    notify(
-      `Finish on ${platformNames[p]}, then record the live listing link in Item details.`,
-    );
   };
   const currentListing = item.listings[platform];
   const ready = canPublish(item, targets, state.connections);
@@ -633,7 +630,7 @@ function SellWorkspace({ id }: { id: string }) {
                     <span>{targets.length} selected</span>
                   </legend>
                   <div className="publish-choice-grid">
-                    {INTEGRATED_PLATFORMS.map((p) => (
+                    {connectedPlatforms.map((p) => (
                       <label
                         key={p}
                         className={`publish-choice ${targets.includes(p) ? "selected" : ""}`}
@@ -642,10 +639,7 @@ function SellWorkspace({ id }: { id: string }) {
                           type="checkbox"
                           aria-label={`Publish on ${platformNames[p]}`}
                           checked={targets.includes(p)}
-                          disabled={
-                            item.listings[p].status === "live" ||
-                            (!state.connections[p] && !targets.includes(p))
-                          }
+                          disabled={item.listings[p].status === "live"}
                           onChange={(e) => toggleTarget(p, e.target.checked)}
                         />
                         <PlatformLogo platform={p} />
@@ -654,170 +648,196 @@ function SellWorkspace({ id }: { id: string }) {
                           <small>
                             {item.listings[p].status === "live"
                               ? "Already live · won’t repost"
-                              : state.connections[p]
-                                ? "Connected · ready to publish"
-                                : "Not connected"}
+                              : "Connected · ready to publish"}
                           </small>
                         </span>
                       </label>
                     ))}
                   </div>
+                  {!connectedPlatforms.length && (
+                    <p>
+                      Connect a marketplace to review and publish your listing.
+                    </p>
+                  )}
                   <Link to="/connections" className="text-button">
                     Manage connections
                     <Link2 size={14} />
                   </Link>
                 </fieldset>
-                <p className="draft-preview-label">
-                  Preview & edit each draft{" "}
-                  <span>Switching previews doesn’t change your selection.</span>
-                </p>
-                <div className="platform-tabs" aria-label="Draft preview only">
-                  {PLATFORMS.map((p) => (
-                    <button
-                      type="button"
-                      key={p}
-                      aria-pressed={platform === p}
-                      onClick={() => setPlatform(p)}
+                {connectedPlatforms.length > 0 && !previewPlatforms.length && (
+                  <p>
+                    Select a marketplace above to preview and edit its draft.
+                  </p>
+                )}
+                {previewPlatforms.length > 0 && (
+                  <>
+                    <p className="draft-preview-label">
+                      Preview & edit each draft{" "}
+                      <span>
+                        Switching previews doesn’t change your selection.
+                      </span>
+                    </p>
+                    <div
+                      className="platform-tabs"
+                      aria-label="Draft preview only"
                     >
-                      <PlatformLogo platform={p} />
-                      <span>
-                        {p === "facebook" ? "Facebook" : platformNames[p]}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {(!currentListing.title ||
-                  currentListing.price !== item.price) &&
-                currentListing.status !== "live" ? (
-                  <div className="inline-note">
-                    <Sparkles size={18} />
-                    <span>
-                      Your details changed. Refresh your drafts to bring them up
-                      to date.
-                    </span>
-                    <Button onClick={generate}>Refresh drafts</Button>
-                  </div>
-                ) : (
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (ready) publish();
-                    }}
-                  >
-                    <label>
-                      Listing title
-                      <span className="optional">
-                        {currentListing.title.length}/
-                        {platform === "ebay" ? 80 : 120}
-                      </span>
-                      <input
-                        required
-                        maxLength={platform === "ebay" ? 80 : 120}
-                        value={currentListing.title}
-                        readOnly={currentListing.status === "live"}
-                        onChange={(e) =>
-                          updateItem(id, (i) => ({
-                            ...i,
-                            reviewed: false,
-                            listings: {
-                              ...i.listings,
-                              [platform]: {
-                                ...i.listings[platform],
-                                title: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                      />
-                    </label>
-                    <label>
-                      Description
-                      <textarea
-                        required
-                        rows={5}
-                        value={currentListing.description}
-                        readOnly={currentListing.status === "live"}
-                        onChange={(e) =>
-                          updateItem(id, (i) => ({
-                            ...i,
-                            reviewed: false,
-                            listings: {
-                              ...i.listings,
-                              [platform]: {
-                                ...i.listings[platform],
-                                description: e.target.value,
-                              },
-                            },
-                          }))
-                        }
-                      />
-                    </label>
-                    <div className="review-price">
-                      <span>Asking price</span>
-                      <strong>{money(item.price)}</strong>
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => setStep(2)}
-                      >
-                        Edit
-                      </button>
-                    </div>
-                    <div className="field-grid">
-                      <label>
-                        Delivery
-                        <select
-                          value={item.delivery}
-                          onChange={(e) =>
-                            patch({ delivery: e.target.value, reviewed: false })
-                          }
+                      {previewPlatforms.map((p) => (
+                        <button
+                          type="button"
+                          key={p}
+                          aria-pressed={platform === p}
+                          onClick={() => setPlatform(p)}
                         >
-                          <option>Buyer-paid shipping</option>
-                          <option>Free shipping</option>
-                          <option>Local pickup</option>
-                        </select>
-                      </label>
-                      <label>
-                        Item location
-                        <input
-                          required
-                          value={item.location}
-                          placeholder="City, state or postal code"
-                          maxLength={100}
-                          onChange={(e) =>
-                            patch({ location: e.target.value, reviewed: false })
-                          }
-                        />
-                      </label>
+                          <PlatformLogo platform={p} />
+                          <span>
+                            {p === "facebook" ? "Facebook" : platformNames[p]}
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                    <div className="inline-note subtle">
-                      <ShieldCheck size={18} />
-                      <span>
-                        Demo delivery settings only. Live publishing will also
-                        require your marketplace’s shipping and return policies.
-                      </span>
-                    </div>
-                    <label className="checkbox-label">
-                      <input
-                        type="checkbox"
-                        checked={item.reviewed}
-                        onChange={(e) => patch({ reviewed: e.target.checked })}
-                      />
-                      <span>
-                        I’ve checked the photos, price, description, and
-                        delivery details.
-                      </span>
-                    </label>
-                    {footer(
-                      "All selected marketplaces publish together.",
-                      <Button type="submit" disabled={!ready}>
-                        {pendingTargets.length
-                          ? `Publish to ${pendingTargets.length} marketplace${pendingTargets.length === 1 ? "" : "s"}`
-                          : "Select a marketplace"}
-                        <ArrowRight size={16} />
-                      </Button>,
+                    {(!currentListing.title ||
+                      currentListing.price !== item.price) &&
+                    currentListing.status !== "live" ? (
+                      <div className="inline-note">
+                        <Sparkles size={18} />
+                        <span>
+                          Your details changed. Refresh your drafts to bring
+                          them up to date.
+                        </span>
+                        <Button onClick={generate}>Refresh drafts</Button>
+                      </div>
+                    ) : (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (ready) publish();
+                        }}
+                      >
+                        <label>
+                          Listing title
+                          <span className="optional">
+                            {currentListing.title.length}/
+                            {platform === "ebay" ? 80 : 120}
+                          </span>
+                          <input
+                            required
+                            maxLength={platform === "ebay" ? 80 : 120}
+                            value={currentListing.title}
+                            readOnly={currentListing.status === "live"}
+                            onChange={(e) =>
+                              updateItem(id, (i) => ({
+                                ...i,
+                                reviewed: false,
+                                listings: {
+                                  ...i.listings,
+                                  [platform]: {
+                                    ...i.listings[platform],
+                                    title: e.target.value,
+                                  },
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label>
+                          Description
+                          <textarea
+                            required
+                            rows={5}
+                            value={currentListing.description}
+                            readOnly={currentListing.status === "live"}
+                            onChange={(e) =>
+                              updateItem(id, (i) => ({
+                                ...i,
+                                reviewed: false,
+                                listings: {
+                                  ...i.listings,
+                                  [platform]: {
+                                    ...i.listings[platform],
+                                    description: e.target.value,
+                                  },
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                        <div className="review-price">
+                          <span>Asking price</span>
+                          <strong>{money(item.price)}</strong>
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() => setStep(2)}
+                          >
+                            Edit
+                          </button>
+                        </div>
+                        <div className="field-grid">
+                          <label>
+                            Delivery
+                            <select
+                              value={item.delivery}
+                              onChange={(e) =>
+                                patch({
+                                  delivery: e.target.value,
+                                  reviewed: false,
+                                })
+                              }
+                            >
+                              <option>Buyer-paid shipping</option>
+                              <option>Free shipping</option>
+                              <option>Local pickup</option>
+                            </select>
+                          </label>
+                          <label>
+                            Item location
+                            <input
+                              required
+                              value={item.location}
+                              placeholder="City, state or postal code"
+                              maxLength={100}
+                              onChange={(e) =>
+                                patch({
+                                  location: e.target.value,
+                                  reviewed: false,
+                                })
+                              }
+                            />
+                          </label>
+                        </div>
+                        <div className="inline-note subtle">
+                          <ShieldCheck size={18} />
+                          <span>
+                            Demo delivery settings only. Live publishing will
+                            also require your marketplace’s shipping and return
+                            policies.
+                          </span>
+                        </div>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={item.reviewed}
+                            onChange={(e) =>
+                              patch({ reviewed: e.target.checked })
+                            }
+                          />
+                          <span>
+                            I’ve checked the photos, price, description, and
+                            delivery details.
+                          </span>
+                        </label>
+                        {footer(
+                          "All selected marketplaces publish together.",
+                          <Button type="submit" disabled={!ready}>
+                            {pendingTargets.length
+                              ? `Publish to ${pendingTargets.length} marketplace${pendingTargets.length === 1 ? "" : "s"}`
+                              : "Select a marketplace"}
+                            <ArrowRight size={16} />
+                          </Button>,
+                        )}
+                      </form>
                     )}
-                  </form>
+                  </>
                 )}
               </div>
             )}
@@ -927,49 +947,6 @@ function SellWorkspace({ id }: { id: string }) {
                     </Button>
                   </div>
                 )}
-                {!busy && (
-                  <details className="manual-marketplaces">
-                    <summary>Post to other marketplaces manually</summary>
-                    <p className="small-text muted">
-                      Copy a draft from Review, finish posting on the
-                      marketplace, then record its live link.
-                    </p>
-                    {PLATFORMS.filter(
-                      (p) => !INTEGRATED_PLATFORMS.includes(p),
-                    ).map((p) => (
-                      <div className="publish-platform" key={p}>
-                        <PlatformLogo platform={p} />
-                        <div className="publish-platform-copy">
-                          <h3>{platformNames[p]}</h3>
-                          <p>
-                            {item.listings[p].status === "live"
-                              ? "Live link recorded"
-                              : item.listings[p].status === "awaiting"
-                                ? "Awaiting a live listing link"
-                                : "Manual publishing"}
-                          </p>
-                        </div>
-                        <a
-                          className="button button-secondary"
-                          href={platformUrls[p]}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          onClick={() => {
-                            if (item.listings[p].status !== "live")
-                              openHandoff(p);
-                          }}
-                        >
-                          Open marketplace
-                          <ExternalLink size={14} />
-                        </a>
-                      </div>
-                    ))}
-                    <Link className="text-button" to={`/items/${id}`}>
-                      Record a listing link
-                      <ArrowRight size={15} />
-                    </Link>
-                  </details>
-                )}
               </div>
             )}
           </fieldset>
@@ -987,7 +964,7 @@ function SellWorkspace({ id }: { id: string }) {
         <ItemSummary item={item} />
       </div>
       <div className="workspace-bottom">
-        {step > 0 ? (
+        {step > 0 && step < 4 ? (
           <Button
             variant="ghost"
             disabled={!!busy}

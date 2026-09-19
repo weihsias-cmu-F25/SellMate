@@ -2,7 +2,7 @@
 
 ## Product direction
 
-“From shelf to sold.” A calm selling workspace with a guided agent flow. Use warm off-white backgrounds, deep olive primary actions, white surfaces, generous spacing, and clear product photography. Keep agent messages short and action-oriented. Show a persistent item preview beside the current task on desktop; collapse it to a compact summary above the task on mobile.
+“From shelf to sold.” A calm selling workspace with a guided agent flow. Use warm off-white and pale orange backgrounds, deep orange primary actions, white surfaces, generous spacing, and clear product photography. Keep agent messages short and action-oriented. Show a persistent item preview beside the current task on desktop; collapse it to a compact summary above the task on mobile.
 
 ## Pages
 
